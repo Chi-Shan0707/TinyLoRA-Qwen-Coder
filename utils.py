@@ -109,43 +109,51 @@ class TinyLoRALinear(nn.Module):
 
     def forward(self, x):
         """Forward pass with TinyLoRA delta / TinyLoRA 增量的前向传播"""
-        # Ensure input and weights share the same dtype to avoid matmul dtype errors.
         orig_dtype = x.dtype
 
-        # Compute TinyLoRA delta (built from frozen buffers)
-        v = self.global_params_ref.global_v
-        vP = v @ self.P
-        S_vP = self.S * vP
-        delta = self.U @ torch.diag(S_vP) @ self.Vh
-
-        # Two codepaths:
-        # - quantized original layer: dequantize weights -> float32, keep inputs float32
-        # - non-quantized: weights stored as bfloat16 -> cast inputs to bfloat16
         if hasattr(self, 'quant_state'):
+            # === Quantized path ===
+            # dequantize_4bit returns W_base in its own dtype (often float32).
+            # We use W_base.dtype as the single compute dtype for ALL matmuls
+            # to guarantee no dtype mismatch.
             from bitsandbytes.functional import dequantize_4bit
             W_base = dequantize_4bit(self.W_base, quant_state=self.quant_state, quant_type="nf4")
-            out = torch.nn.functional.linear(x, W_base, None)
+            compute_dtype = W_base.dtype
 
-            # delta (buffers are bfloat16) must be cast to W_base dtype (float)
-            delta = delta.to(W_base.dtype)
-            out = out + torch.nn.functional.linear(x, delta, None)
+            # Cast input to compute dtype
+            x_cast = x.to(compute_dtype)
+            out = torch.nn.functional.linear(x_cast, W_base, None)
 
-            if self.bias is not None:
-                out = out + self.bias.to(out.dtype)
+            # Compute TinyLoRA delta entirely in compute_dtype
+            v = self.global_params_ref.global_v.to(compute_dtype)
+            vP = v @ self.P.to(compute_dtype)
+            S_vP = self.S.to(compute_dtype) * vP
+            delta = self.U.to(compute_dtype) @ torch.diag(S_vP) @ self.Vh.to(compute_dtype)
 
-            return out
-        else:
-            # non-quantized path: cast inputs to weight dtype (e.g., bfloat16)
-            x_cast = x.to(self.W_base.dtype)
-            out = torch.nn.functional.linear(x_cast, self.W_base, None)
-
-            # delta is already in the same dtype as the buffers (bfloat16)
             out = out + torch.nn.functional.linear(x_cast, delta, None)
 
             if self.bias is not None:
-                out = out + self.bias
+                out = out + self.bias.to(compute_dtype)
 
-            # return to original dtype (model may expect float32 downstream)
+            return out.to(orig_dtype)
+        else:
+            # === Non-quantized path ===
+            # Use W_base dtype (bfloat16) as compute dtype
+            compute_dtype = self.W_base.dtype
+            x_cast = x.to(compute_dtype)
+            out = torch.nn.functional.linear(x_cast, self.W_base, None)
+
+            # Compute TinyLoRA delta in same dtype
+            v = self.global_params_ref.global_v.to(compute_dtype)
+            vP = v @ self.P.to(compute_dtype)
+            S_vP = self.S.to(compute_dtype) * vP
+            delta = self.U.to(compute_dtype) @ torch.diag(S_vP) @ self.Vh.to(compute_dtype)
+
+            out = out + torch.nn.functional.linear(x_cast, delta, None)
+
+            if self.bias is not None:
+                out = out + self.bias.to(compute_dtype)
+
             return out.to(orig_dtype)
 
 

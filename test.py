@@ -185,8 +185,6 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
             # Tokenize and generate / 分词并生成
             inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
-            # Ensure inputs are float32 for 4-bit quantized model / 确保输入为 float32 以适配 4-bit 量化模型
-            inputs = {k: v.to(torch.float32) if v.dtype != torch.int64 else v for k, v in inputs.items()}
             
             try:
                 outputs = model.generate(
