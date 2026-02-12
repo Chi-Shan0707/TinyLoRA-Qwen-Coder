@@ -4,7 +4,7 @@
 
 **强化学习训练超参数压缩模型：Qwen2.5-Coder-Instruct on CodeContests**<br>
 
-**Version 2**
+**Version 2.5**
 
 [中文版本](#中文版本) | [English Version](#english-version)
 
@@ -13,6 +13,35 @@
 如果这个项目对你有帮助，或者你觉得有点意思，请点击右上角的 Star 支持一下！这对我很重要，万分感谢PwP！<br>
 If you find this project useful or interesting, please give it a Star! 🌟 Your support is my greatest motivation.<br>
 </div>
+
+---
+
+## 更新日志 / Changelog
+
+### v2.5 — 关键 Bug 修复 (Critical Bug Fixes)
+
+本次更新修复了导致**训练零梯度、测试零代码提取**的三个关键缺陷：
+
+| # | Bug 描述 | 影响 | 修复 |
+| :---: | :--- | :--- | :--- |
+| **1** | `global_v` 初始化为 `randn` 而非 `zeros` | 所有线性层从第一次前向传播起就受到巨大的随机扰动（$\Delta W$ 量级 ~400），导致模型输出乱码，无法提取代码，GRPO 奖励全为 0，梯度为 0，参数永远无法更新 | `utils.py`: `TinyLoRAGlobalParams.__init__` 中改为 `torch.zeros(...)` |
+| **2** | 训练与测试的随机种子对齐错误 | 训练时种子在 `apply_tiny_lora` 前**紧邻**设置；测试时种子在**模型加载前**设置，模型加载消耗大量随机状态，导致 P 矩阵不一致，已训练的 `v` 向量与错误的 P 矩阵搭配产生错误的 $\Delta W$ | `test.py`: 在 `apply_tiny_lora` 调用前重新设置种子 |
+| **3** | P 矩阵缺少 $1/\sqrt{r}$ 缩放 | 梯度量级控制不佳，论文建议使用缩放因子以稳定方差 | `utils.py`: P 矩阵生成时除以 `rank ** 0.5` |
+
+**症状链（v2.0 及之前）：**
+```
+global_v ~ N(0,1) → ΔW 量级爆炸 → 模型输出乱码 → 无法提取代码
+→ reward 全为 0 → GRPO advantage = 0/0 → grad_norm = 0, loss = 0
+→ v 永不更新 → 保存的 checkpoint 仍为随机值 → 测试同样失败
+```
+
+> **重要**：v2.5 修改了 P 矩阵缩放和 `global_v` 初始化方式，旧版本的 checkpoint（`.pt` 文件）**不兼容**，需要重新训练。
+
+### v2.0 — 模块化重构 & 验证系统
+- 将共享工具提取到 `utils.py`
+- 新增 `validate.py` 和 `test.py`
+- 支持训练中验证与最佳模型自动保存
+- 支持基线测试（`--baseline`）
 
 ---
 
@@ -418,6 +447,8 @@ python train_rl.py 16          # u=16，训练全部样本（第二个参数可�
 ```
 
 > **还原方式**：加载基座模型 → 用相同 `seed` 固定随机种子 → 用相同 `u_value` 和 `rank` 执行 `apply_tiny_lora` → 将 `global_v` 加载回 `global_params.global_v`。种子相同保证 P 矩阵完全一致，SVD 是确定性运算所以 U/S/Vh 也一致。
+>
+> **❗ v2.5 关键提示**：种子必须在 `apply_tiny_lora` 调用**紧前**设置，**不能**在模型加载之前设置（模型加载会消耗随机状态，导致 P 矩阵不一致）。
 
 如果你想自定义输出目录，可以修改 `train_rl.py` 顶部的：
 
@@ -486,6 +517,7 @@ OUTPUT_DIR = "./output/luoguqwencoder-lora"
 2. **TinyLoRA 注入与参数冻结**
    - 创建全局共享向量（维度由命令行参数 `u` 决定，默认16）：
      - `global_v = nn.Parameter(torch.zeros(U_VALUE))`
+   - **注意 (v2.5)**：必须初始化为 `zeros`，不能使用 `randn`！`randn` 初始化会导致 $\Delta W$ 爆炸、模型乱码、梯度为零的连锁故障。
    - 通过 `apply_tiny_lora(model, global_v)`：
      - 遍历模型子模块；
      - 找到名字以 `q_proj / k_proj / v_proj / o_proj / gate_proj / up_proj / down_proj` 结尾的 `nn.Linear`；
@@ -834,6 +866,33 @@ python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --n
 
 TinyLoRA-Qwen-CoderL is an advanced evolution of the original [LuoguQwen SFT project](https://github.com/Chi-Shan0707/Qwen4Luogu-SFT) and [Qwen4Luogu-RL project](https://github.com/Chi-Shan0707/Qwen4Luogu-RL).
 
+### Changelog
+
+#### v2.5 — Critical Bug Fixes
+
+This release fixes three critical bugs that caused **zero gradients during training and zero code extraction during testing**:
+
+| # | Bug | Impact | Fix |
+| :---: | :--- | :--- | :--- |
+| **1** | `global_v` initialized with `randn` instead of `zeros` | Every linear layer received a massive random perturbation ($\Delta W$ magnitude ~400) from the first forward pass, turning model outputs into gibberish. No code could be extracted, all GRPO rewards were 0, gradients were 0, and `v` was never updated. | `utils.py`: Changed `TinyLoRAGlobalParams.__init__` to use `torch.zeros(...)` |
+| **2** | Random seed misalignment between training and testing | During training, seed was set *immediately before* `apply_tiny_lora`. During testing, seed was set *before model loading*, which consumes extensive random state, causing P matrices to differ. The trained `v` vector paired with wrong P matrices produced incorrect $\Delta W$. | `test.py`: Re-seed right before `apply_tiny_lora` call |
+| **3** | P matrix missing $1/\sqrt{r}$ scaling | Poor gradient magnitude conditioning; the paper recommends a scaling factor for variance stability. | `utils.py`: P matrix generation now divides by `rank ** 0.5` |
+
+**Symptom chain (v2.0 and earlier):**
+```
+global_v ~ N(0,1) → ΔW explodes → model outputs gibberish → no code extracted
+→ all rewards = 0 → GRPO advantage = 0/0 → grad_norm = 0, loss = 0
+→ v never updates → saved checkpoint still random → test also fails
+```
+
+> **Important**: v2.5 changes P matrix scaling and `global_v` initialization. Checkpoints (`.pt` files) from previous versions are **incompatible** and require retraining.
+
+#### v2.0 — Modular Refactor & Validation System
+- Extracted shared utilities into `utils.py`
+- Added `validate.py` and `test.py`
+- Support for in-training validation with automatic best model saving
+- Support for baseline testing (`--baseline`)
+
 The goal of 
 TinyLoRA-Qwen-Coder is:
 > Under the constraints of extremely limited VRAM (3B model + 4bit quantization) and extreme parameter compression (only 16 trainable parameters), train Qwen2.5-Coder through Reinforcement Learning (RL) to generate C++ code that passes sample tests on CodeContests competitive programming problems.
@@ -1115,6 +1174,7 @@ Training and validation save `.pt` files with the following information:
 
 **Important Notes:**
 - Random seed `seed` is critical for reproducibility; it generates P matrices
+- **v2.5 Note**: The seed must be set *immediately before* `apply_tiny_lora`, **not** before model loading (model loading consumes random state, causing P matrix mismatch)
 - SVD decomposition is deterministic, so U/S/Vh are fully reproducible
 - With identical `seed`, `u_value`, `rank`, the model can be completely reconstructed
 

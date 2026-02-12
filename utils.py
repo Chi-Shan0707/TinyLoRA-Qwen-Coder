@@ -26,7 +26,9 @@ class TinyLoRAGlobalParams(nn.Module):
     """专门用于注册全局共享向量的容器 / Container for global shared vector"""
     def __init__(self, u_dim=16, device='cpu', dtype=torch.bfloat16):
         super().__init__()
-        self.global_v = nn.Parameter(torch.randn(u_dim, device=device, dtype=dtype))
+        # 【关键】必须初始化为零，确保初始 ΔW=0，模型从未扰动状态开始
+        # CRITICAL: Must init to zeros so initial ΔW=0 and model starts unperturbed
+        self.global_v = nn.Parameter(torch.zeros(u_dim, device=device, dtype=dtype))
     
     def forward(self):
         """不实际调用，仅用于注册参数 / Not actually called, only for parameter registration"""
@@ -91,7 +93,9 @@ class TinyLoRALinear(nn.Module):
         # Generate fixed random projection matrix P / 生成固定随机投影矩阵 P
         # NOTE: This uses the global random seed set before apply_tiny_lora
         # 注意：这使用在 apply_tiny_lora 之前设置的全局随机种子
-        P = torch.randn(u_dim, self.rank, device=device, dtype=torch.bfloat16)
+        # Scale by 1/sqrt(rank) per paper recommendation to control variance
+        # 按论文建议除以 sqrt(rank) 以控制方差
+        P = torch.randn(u_dim, self.rank, device=device, dtype=torch.bfloat16) / (self.rank ** 0.5)
         self.register_buffer('P', P)
         
         # Store original weight and bias / 存储原始权重和偏置
@@ -298,7 +302,7 @@ def convert_hf_tests_to_list(hf_tests):
 
 # ========== Model Loading Utilities ==========
 
-def get_model_and_tokenizer(model_path, use_4bit=True):
+def get_model_and_tokenizer(model_path, use_4bit=True, for_inference=False):
     """
     Load model and tokenizer with 4-bit quantization
     加载 4-bit 量化的模型和分词器
@@ -306,6 +310,8 @@ def get_model_and_tokenizer(model_path, use_4bit=True):
     Args:
         model_path: Path to the model / 模型路径
         use_4bit: Whether to use 4-bit quantization / 是否使用 4-bit 量化
+        for_inference: If True, enable KV cache and skip gradient checkpointing
+                       如果为 True，启用 KV 缓存并跳过梯度检查点
     
     Returns:
         tuple: (model, tokenizer)
@@ -339,8 +345,15 @@ def get_model_and_tokenizer(model_path, use_4bit=True):
             torch_dtype=torch.bfloat16,
         )
         
-        model.config.use_cache = False
-        model = prepare_model_for_kbit_training(model)
+        if for_inference:
+            # Inference mode: enable KV cache, skip gradient checkpointing
+            # 推理模式：启用 KV 缓存，跳过梯度检查点
+            model.config.use_cache = True
+        else:
+            # Training mode: disable KV cache, prepare for kbit training
+            # 训练模式：禁用 KV 缓存，准备 k-bit 训练
+            model.config.use_cache = False
+            model = prepare_model_for_kbit_training(model)
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,

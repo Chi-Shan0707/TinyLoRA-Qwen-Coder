@@ -91,7 +91,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         model_id = 'qwen/Qwen2.5-Coder-3B-Instruct' if baseline else model_id
         model_path = model_id
     
-    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=True)
+    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=True, for_inference=True)
     
     # ========== Step 4: Conditionally inject TinyLoRA / 条件性注入 TinyLoRA ==========
     if not baseline:
@@ -105,6 +105,12 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         
         # Register to model / 注册到模型
         model.tiny_lora_params = global_params
+        
+        # 【关键】重新设置随机种子，确保 P 矩阵与训练时一致
+        # CRITICAL: Re-seed right before apply_tiny_lora to match training P matrices
+        # In train_rl.py, seed is set RIGHT BEFORE apply_tiny_lora, not before model loading
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
         
         # Apply TinyLoRA (this will use the fixed random seed) / 应用 TinyLoRA（会使用固定的随机种子）
         total_replaced = apply_tiny_lora(model, global_params)
