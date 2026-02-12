@@ -204,7 +204,10 @@ Please provide your C++ solution :"""
     # ------------------------------------------------------------------
     print_step("STEP 3: 执行模型生成")
     
-    inputs = tokenizer([final_prompt], return_tensors="pt").to(model.device)
+    inputs = tokenizer([final_prompt], return_tensors="pt")
+    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    # Ensure inputs are float32 for 4-bit quantized model / 确保输入为 float32 以适配 4-bit 量化模型
+    inputs = {k: v.to(torch.float32) if v.dtype != torch.int64 else v for k, v in inputs.items()}
     
     print(f"Prompt token 长度: {inputs.input_ids.shape[1]}")
     print("正在生成 (Max 1024 tokens)...")
