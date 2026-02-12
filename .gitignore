@@ -145,3 +145,7 @@ local_luogu_dpo/
 local_luogu_rl/luogu_rl_data.jsonl
 
 !tiny_lora_v.pt
+
+
+
+code_contests_train.jsonl

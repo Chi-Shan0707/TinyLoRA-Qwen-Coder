@@ -66,11 +66,13 @@ If you find this project useful or interesting, please give it a Star! 🌟 Your
 ## 目录
 
 - [项目概述](#项目概述)
+- [项目结构](#项目结构)
 - [论文复现](#论文复现)
 - [核心特点](#核心特点)
 - [快速开始](#快速开始)
 - [数据准备与格式](#数据准备与格式)
 - [训练流程（RL / GRPO）](#训练流程rl--grpo)
+- [验证与测试](#验证与测试)
 - [TinyLoRA Tiling 技术细节](#tinylora-tiling-技术细节)
 - [奖励函数：编译运行 C++ 代码](#奖励函数编译运行-c-代码)
 - [资源消耗与注意事项](#资源消耗与注意事项)
@@ -113,6 +115,142 @@ LuoguQwen-RL 的目标是：
 - `local_code_contests/`：本地存储的 CodeContests 训练/验证/测试数据（JSONL 格式）。
 - `models/Qwen2.5-Coder-3B-Instruct/`：基座模型目录（可通过 ModelScope 自动下载）。
 - `output/`：RL 训练输出目录（包括最终的 `tiny_lora_v.pt`，内含 `global_v` 向量及重建所需的元信息）。
+
+---
+## 项目结构
+
+本项目采用模块化设计，将训练、验证和测试逻辑分离，提高代码可维护性和可重复性。
+
+### 核心模块
+
+#### 1. `utils.py` - 共享工具模块
+
+包含所有训练、验证和测试共享的核心功能：
+
+- **TinyLoRA 类**：
+  - `TinyLoRAGlobalParams`: 全局共享向量容器
+  - `TinyLoRALinear`: 自定义 TinyLoRA 线性层
+  - `apply_tiny_lora()`: 将 TinyLoRA 层注入模型
+
+- **代码评估功能**：
+  - `compile_and_run()`: C++ 代码编译和运行
+  - `extract_code_from_response()`: 从模型响应中提取代码
+  - `convert_hf_tests_to_list()`: 转换测试用例格式
+
+- **模型加载工具**：
+  - `get_model_and_tokenizer()`: 加载 4-bit 量化模型和分词器
+
+#### 2. `train_rl.py` - 训练脚本
+
+主训练脚本，支持可选的验证功能：
+
+```bash
+# 基本训练 / Basic training
+python train_rl.py [u_value] [max_samples]
+
+# 带验证的训练 / Training with validation
+python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
+```
+
+**命令行参数 / Command-line Arguments:**
+- `u_value`: TinyLoRA 共享向量维度（默认 16）
+- `max_samples`: 最大训练样本数（默认 2000）
+- `--do_validate`: 启用训练期间验证
+- `--val_steps N`: 每 N 步进行一次验证（默认 100）
+- `--val_samples N`: 验证样本数（默认 10）
+
+**验证功能**：
+- 训练期间自动运行验证
+- 跟踪最佳 Pass@1 分数
+- 自动保存最佳模型至 `best_tiny_lora_v.pt`
+
+#### 3. `validate.py` - 验证脚本
+
+可以作为独立脚本运行，也可以被 `train_rl.py` 导入：
+
+```bash
+# 独立验证 / Standalone validation
+python validate.py [num_samples]
+```
+
+**功能**：
+- 加载训练好的检查点
+- 在验证集上评估模型
+- 计算 Pass@1、编译成功率等指标
+
+#### 4. `test.py` - 测试脚本
+
+用于在测试集上评估最终模型：
+
+```bash
+# 基本测试 - 测试 TinyLoRA 微调模型（使用命名参数）
+python test.py --checkpoint_path <path> --num_samples <N>
+
+# 基线测试 - 测试原始基座模型（不含 TinyLoRA，使用命名参数）
+python test.py --baseline --num_samples <N>
+
+# 示例 / Examples
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50      # 测试微调模型
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100 # 测试最佳模型
+python test.py --baseline --num_samples 50                                                      # 测试基座模型（对比）
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --test_data ./local_code_contests/code_contests_test.jsonl
+```
+
+**功能**：
+- **TinyLoRA 模式**（默认）：从 `.pt` 检查点加载元数据（seed, u_value, rank）
+  - 设置随机种子以确保 P 矩阵一致
+  - 加载基座模型并注入 TinyLoRA
+  - 加载训练权重 `global_v`
+- **基线模式**（`--baseline`）：直接运行原始基座模型，用于对比微调效果
+  - 不加载检查点
+  - 不注入 TinyLoRA
+  - 可视化微调的性能提升
+- 在测试集上运行评估
+
+#### 5. `download_dataset.py` - 数据集下载脚本
+
+从 HuggingFace 流式下载 CodeContests 数据集：
+
+```bash
+python download_dataset.py
+```
+
+### 工作流程
+
+```mermaid
+graph LR
+    A[下载数据集] --> B[训练模型]
+    B --> C[验证（可选）]
+    C --> D[保存最佳模型]
+    D --> E[测试评估]
+    
+    style A fill:#e1f5ff
+    style B fill:#fff3e0
+    style C fill:#f3e5f5
+    style D fill:#e8f5e9
+    style E fill:#fce4ec
+```
+
+1. **数据准备**: 运行 `download_dataset.py` 下载并预处理数据
+2. **模型训练**: 运行 `train_rl.py` 进行 RL 训练（可选带验证）
+3. **训练中验证**: 如果启用 `--do_validate`，会在训练过程中定期验证
+4. **保存最佳模型**: 验证分数提高时自动保存 `best_tiny_lora_v.pt`
+5. **最终测试**: 运行 `test.py` 在测试集上评估模型
+
+### 文件依赖关系
+
+```
+utils.py (基础工具)
+  │
+  ├── train_rl.py (导入并使用)
+  │   └── 调用 validate.py
+  │
+  ├── validate.py (导入并使用)
+  │
+  └── test.py (导入并使用)
+```
+
+所有脚本都依赖 `utils.py` 中的共享功能，确保代码一致性和可维护性。
 
 ---
 ## 论文复现
@@ -379,6 +517,137 @@ GRPO 的整体流程简要为：
 
 
 支持自定义的GRPO，如reward设置。
+
+---
+
+## 验证与测试
+
+### 训练中验证（Validation during Training）
+
+从 v2.0 开始，`train_rl.py` 支持在训练过程中定期运行验证：
+
+```bash
+# 启用验证 / Enable validation
+python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
+```
+
+**参数说明**：
+- `--do_validate`: 启用验证功能
+- `--val_steps N`: 每 N 个训练步骤运行一次验证（默认 100）
+- `--val_samples N`: 每次验证使用的样本数（默认 10）
+
+**验证流程**：
+1. 在指定步骤触发验证回调
+2. 在验证集上生成代码并编译运行
+3. 计算 Pass@1、编译成功率等指标
+4. 如果 Pass@1 提高，自动保存到 `best_tiny_lora_v.pt`
+
+**输出示例**：
+```
+================================================================================
+🔍 Running validation at step 100 / 在第 100 步运行验证
+================================================================================
+
+📊 Validation Results / 验证结果:
+  • Average Score / 平均分数: 0.6500
+  • Compile Rate / 编译成功率: 80.00%
+  • Pass@1 / 通过率: 35.00%
+  • Compile Success / 编译成功: 8/10
+  • Full Pass / 完全通过: 3/10
+
+================================================================================
+🎉 New best model! / 新的最佳模型！
+   Previous best Pass@1 / 之前最佳通过率: 0.00%
+   Current Pass@1 / 当前通过率: 35.00%
+================================================================================
+
+💾 Best model saved to / 最佳模型已保存至: ./output/luoguqwencoder-lora/best_tiny_lora_v.pt
+```
+
+### 独立验证（Standalone Validation）
+
+也可以在训练后单独运行验证：
+
+```bash
+# 使用默认设置 / Use default settings
+python validate.py
+
+# 自定义验证样本数 / Custom number of samples
+python validate.py 50
+```
+
+`validate.py` 会：
+1. 加载 `./output/luoguqwencoder-lora/tiny_lora_v.pt` 检查点
+2. 重建 TinyLoRA 模型
+3. 在验证集上评估
+4. 输出详细指标
+
+### 测试评估（Testing）
+
+在训练完成后，使用 `test.py` 在测试集上进行最终评估：
+
+```bash
+# 基本用法 / Basic usage (named args)
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
+
+# 测试最佳模型 / Test best model
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
+
+# 自定义测试数据 / Custom test data
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --test_data ./local_code_contests/code_contests_test.jsonl
+```
+
+**命令行参数**：
+- `--checkpoint_path`: 检查点路径（默认 `./output/luoguqwencoder-lora/tiny_lora_v.pt`）
+- `--num_samples`: 测试样本数（默认 50）
+- `--test_data`: 测试数据集路径
+
+**测试流程**：
+1. **加载检查点**：读取 `.pt` 文件中的元数据（`seed`, `u_value`, `rank`）
+2. **设置随机种子**：使用 `torch.manual_seed(seed)` 确保 P 矩阵一致
+3. **加载基座模型**：使用 4-bit 量化加载 `Qwen2.5-Coder-3B-Instruct`
+4. **注入 TinyLoRA**：使用相同的 `u_value` 和 `seed` 执行 `apply_tiny_lora`
+5. **加载权重**：将 `global_v` 加载到模型
+6. **运行评估**：在测试集上生成代码并评估
+
+**输出示例**：
+```
+================================================================================
+✅ Evaluation complete / 评估完成
+================================================================================
+
+📊 Test Results / 测试结果:
+   • Total Samples / 总样本数: 50
+   • Average Score / 平均分数: 0.7200
+   • Compile Rate / 编译成功率: 86.00% (43/50)
+   • Pass@1 / 完全通过率: 42.00% (21/50)
+   • Partial Pass / 部分通过: 22/50
+   • No Code Extracted / 未提取到代码: 7/50
+================================================================================
+```
+
+### 检查点文件格式
+
+训练和验证保存的 `.pt` 文件包含以下信息：
+
+```python
+{
+    "global_v": tensor([...]),           # 训练好的共享向量
+    "u_value": 16,                       # 向量维度
+    "rank": 2,                           # TinyLoRA 秩
+    "seed": 42,                          # 随机种子（用于重建 P 矩阵）
+    "model_id": "qwen/Qwen2.5-Coder-3B-Instruct",  # 基座模型 ID
+    "total_replaced_layers": 252,       # 替换的层数
+    "validation_score": 0.42,           # 验证分数（仅 best_tiny_lora_v.pt）
+    "step": 500,                         # 训练步数（仅 best_tiny_lora_v.pt）
+}
+```
+
+**重要提示**：
+- 随机种子 `seed` 对于重现至关重要，P 矩阵由它生成
+- SVD 分解是确定性运算，U/S/Vh 可完全复现
+- 只要 `seed`, `u_value`, `rank` 相同，就能完全重建模型
+
 ---
 
 ## TinyLoRA Tiling 技术细节
@@ -603,6 +872,251 @@ At such extreme parameter scales (<100 parameters), Supervised Fine-Tuning (SFT)
 | **Precision** | BF16 / FP32 | **4-bit (NF4) + Dynamic Dequant SVD** |
 | **Reward** | Exact Match | **g++ Compile + Test Case Execution** |
 | **Optimization**| High-end GPUs (A100/H100) | **Consumer GPUs (16GB+ VRAM)** |
+
+---
+
+## Project Structure
+
+This project adopts a modular design, separating training, validation, and testing logic for better maintainability and reproducibility.
+
+### Core Modules
+
+#### 1. `utils.py` - Shared Utilities Module
+
+Contains all shared functionality for training, validation, and testing:
+
+- **TinyLoRA Classes**:
+  - `TinyLoRAGlobalParams`: Global shared vector container
+  - `TinyLoRALinear`: Custom TinyLoRA linear layer
+  - `apply_tiny_lora()`: Inject TinyLoRA layers into model
+
+- **Code Evaluation Functions**:
+  - `compile_and_run()`: C++ code compilation and execution
+  - `extract_code_from_response()`: Extract code from model response
+  - `convert_hf_tests_to_list()`: Convert test case format
+  - `apply_chat_template()`: Build prompts from problem descriptions
+
+- **Model Loading Utilities**:
+  - `get_model_and_tokenizer()`: Load 4-bit quantized model and tokenizer
+
+#### 2. `train_rl.py` - Training Script
+
+Main training script with optional validation support:
+
+```bash
+# Basic training
+python train_rl.py [u_value] [max_samples]
+
+# Training with validation
+python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
+```
+
+**Command-line Arguments:**
+- `u_value`: TinyLoRA shared vector dimension (default: 16)
+- `max_samples`: Maximum training samples (default: 2000)
+- `--do_validate`: Enable validation during training
+- `--val_steps N`: Run validation every N steps (default: 100)
+- `--val_samples N`: Number of validation samples (default: 10)
+
+**Validation Features:**
+- Automatic validation during training
+- Tracks best Pass@1 score
+- Auto-saves best model to `best_tiny_lora_v.pt`
+
+#### 3. `validate.py` - Validation Script
+
+Can be run standalone or imported by `train_rl.py`:
+
+```bash
+# Standalone validation
+python validate.py [num_samples]
+```
+
+**Features:**
+- Loads trained checkpoint
+- Evaluates on validation set
+- Calculates Pass@1, compile rate, and other metrics
+
+#### 4. `test.py` - Testing Script
+
+For final evaluation on the test dataset (named parameters):
+
+```bash
+# Basic testing
+python test.py --checkpoint_path <path> --num_samples <N>
+
+# Baseline testing (base model without TinyLoRA)
+python test.py --baseline --num_samples <N>
+
+# Examples
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
+```
+
+**Features:**
+- Loads metadata from `.pt` checkpoint (seed, u_value, rank)
+- Sets random seed to ensure identical P matrices
+- Loads base model and injects TinyLoRA
+- Loads trained weights `global_v`
+- Runs evaluation on test set
+
+#### 5. `download_dataset.py` - Dataset Download Script
+
+Stream-downloads CodeContests dataset from HuggingFace:
+
+```bash
+python download_dataset.py
+```
+
+### Workflow
+
+1. **Data Preparation**: Run `download_dataset.py` to download and preprocess data
+2. **Model Training**: Run `train_rl.py` for RL training (optional with validation)
+3. **Training Validation**: If `--do_validate` is enabled, periodic validation runs automatically
+4. **Save Best Model**: Automatically saves to `best_tiny_lora_v.pt` when validation score improves
+5. **Final Testing**: Run `test.py` to evaluate model on test set
+
+### File Dependencies
+
+```
+utils.py (base utilities)
+  │
+  ├── train_rl.py (imports and uses)
+  │   └── calls validate.py
+  │
+  ├── validate.py (imports and uses)
+  │
+  └── test.py (imports and uses)
+```
+
+All scripts depend on shared functionality in `utils.py`, ensuring code consistency and maintainability.
+
+---
+
+## Validation & Testing
+
+### Validation During Training
+
+From v2.0, `train_rl.py` supports periodic validation during training:
+
+```bash
+# Enable validation
+python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
+```
+
+**Parameters:**
+- `--do_validate`: Enable validation functionality
+- `--val_steps N`: Run validation every N training steps (default: 100)
+- `--val_samples N`: Number of samples per validation run (default: 10)
+
+**Validation Flow:**
+1. Validation callback triggers at specified steps
+2. Generates code on validation set and compiles/runs
+3. Calculates Pass@1, compile rate, and other metrics
+4. If Pass@1 improves, auto-saves to `best_tiny_lora_v.pt`
+
+**Example Output:**
+```
+🔍 Running validation at step 100
+
+📊 Validation Results:
+  • Average Score: 0.6500
+  • Compile Rate: 80.00%
+  • Pass@1: 35.00%
+  • Compile Success: 8/10
+  • Full Pass: 3/10
+
+🎉 New best model!
+   Previous best Pass@1: 0.00%
+   Current Pass@1: 35.00%
+
+💾 Best model saved to: ./output/luoguqwencoder-lora/best_tiny_lora_v.pt
+```
+
+### Standalone Validation
+
+Can also run validation independently after training:
+
+```bash
+# Use default settings
+python validate.py
+
+# Custom number of samples
+python validate.py 50
+```
+
+### Testing Evaluation
+
+After training completes, use `test.py` for final evaluation on test set:
+
+```bash
+# Test TinyLoRA model (named args)
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
+
+# Test best model
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
+
+# Test base model (for comparison - shows effect of fine-tuning)
+python test.py --baseline --num_samples 50
+
+# Custom test data
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --test_data ./local_code_contests/code_contests_test.jsonl
+```
+
+**Baseline Mode (`--baseline`)**:
+- Tests the original base model WITHOUT TinyLoRA adaptations
+- Useful to see the effect of fine-tuning by comparing with baseline
+- Skips checkpoint loading and TinyLoRA injection
+- Direct comparison: `python test.py --baseline --num_samples 50` vs `python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 50`
+
+**Command-line Arguments:**
+- `--checkpoint_path`: Checkpoint path (default: `./output/luoguqwencoder-lora/tiny_lora_v.pt`)
+- `--num_samples`: Number of test samples (default: 50)
+- `--test_data`: Test dataset path
+- `--baseline`: Test base model without TinyLoRA (for comparison with fine-tuned version)
+
+**Testing Flow:**
+1. **Load Checkpoint**: Read metadata from `.pt` file (`seed`, `u_value`, `rank`)
+2. **Set Random Seed**: Use `torch.manual_seed(seed)` to ensure identical P matrices
+3. **Load Base Model**: Load 4-bit quantized `Qwen2.5-Coder-3B-Instruct`
+4. **Inject TinyLoRA**: Execute `apply_tiny_lora` with same `u_value` and `seed`
+5. **Load Weights**: Load `global_v` into model
+6. **Run Evaluation**: Generate code on test set and evaluate
+
+**Example Output:**
+```
+📊 Test Results:
+   • Total Samples: 50
+   • Average Score: 0.7200
+   • Compile Rate: 86.00% (43/50)
+   • Pass@1: 42.00% (21/50)
+   • Partial Pass: 22/50
+   • No Code Extracted: 7/50
+```
+
+### Checkpoint File Format
+
+Training and validation save `.pt` files with the following information:
+
+```python
+{
+    "global_v": tensor([...]),           # Trained shared vector
+    "u_value": 16,                       # Vector dimension
+    "rank": 2,                           # TinyLoRA rank
+    "seed": 42,                          # Random seed (for rebuilding P matrices)
+    "model_id": "qwen/Qwen2.5-Coder-3B-Instruct",  # Base model ID
+    "total_replaced_layers": 252,       # Number of replaced layers
+    "validation_score": 0.42,           # Validation score (best_tiny_lora_v.pt only)
+    "step": 500,                         # Training step (best_tiny_lora_v.pt only)
+}
+```
+
+**Important Notes:**
+- Random seed `seed` is critical for reproducibility; it generates P matrices
+- SVD decomposition is deterministic, so U/S/Vh are fully reproducible
+- With identical `seed`, `u_value`, `rank`, the model can be completely reconstructed
+
+---
 
 ### Core Features
 
