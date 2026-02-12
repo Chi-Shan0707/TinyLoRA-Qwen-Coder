@@ -2,7 +2,9 @@
 
 <div align="center">
 
-**强化学习训练超参数压缩模型：Qwen2.5-Coder-Instruct on CodeContests**
+**强化学习训练超参数压缩模型：Qwen2.5-Coder-Instruct on CodeContests**<br>
+
+**Version 2**
 
 [中文版本](#中文版本) | [English Version](#english-version)
 
