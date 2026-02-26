@@ -1,18 +1,42 @@
-# TinyLoRA-Qwen-Coder Experiment
-
 <div align="center">
 
-**强化学习训练超参数压缩模型：Qwen2.5-Coder-Instruct on CodeContests**<br>
+# 🧬 TinyLoRA-Qwen-Coder
 
-**Version 2.5**
+**用可配置数量的参数（默认 32）微调代码模型——而且真的有效。**<br>
+**Fine-tune a code model with configurable parameters (default: 32) — and it actually works.**
 
-[中文版本](#中文版本) | [English Version](#english-version)
+[![Paper](https://img.shields.io/badge/Paper-Learning_to_Reason_in_13_Parameters-blue)](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
+[![License](https://img.shields.io/badge/License-CC_BY_4.0-green)](./LICENSE)
+[![Model](https://img.shields.io/badge/Base-Qwen2.5--Coder--3B--Instruct-purple)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct)
+[![Dataset](https://img.shields.io/badge/Data-CodeContests_(AlphaCode)-orange)](https://huggingface.co/datasets/deepmind/code_contests)
+![Version](https://img.shields.io/badge/Version-2.5-red)
 
-本项目是在 [Qwen4Luogu-RL](https://github.com/Chi-Shan0707/Qwen4Luogu-RL) 的基础上进行的改进与实验。
+<br>
 
-如果这个项目对你有帮助，或者你觉得有点意思，请点击右上角的 Star 支持一下！这对我很重要，万分感谢PwP！<br>
-If you find this project useful or interesting, please give it a Star! 🌟 Your support is my greatest motivation.<br>
+| 🔢 可训练参数 | 🧠 基座模型 | 🎯 任务 | ⚡ 训练方法 | 💾 显存需求 |
+| :---: | :---: | :---: | :---: | :---: |
+| **u=32（可调）** | Qwen2.5-Coder-3B（示例）| C++ 代码生成 | GRPO (RL) | 16GB+ |
+
+<br>
+
+[中文版本](#中文版本) | [English Version](#english-version) | [📄 论文解读 / Paper Notes](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
+
 </div>
+
+---
+
+### ✨ 一句话介绍 / What is this?
+
+> 复现 [TinyLoRA](https://arxiv.org/abs/2602.04118) 论文，把它从数学推理搬到**代码竞赛**：
+> 在 Qwen2.5-Coder-3B-Instruct (4-bit) 上注入 TinyLoRA，配置 **u=32 个可训练标量参数**（可调）， 
+> 通过 GRPO 强化学习 + `g++` 编译运行奖励，让模型学会生成能通过测试用例的 C++ 代码。
+>
+> Reproduction of [TinyLoRA](https://arxiv.org/abs/2602.04118), ported from math reasoning to **competitive programming**:
+> Inject TinyLoRA into Qwen2.5-Coder-3B-Instruct (4-bit), configure **u=32 trainable scalar parameters** (adjustable) across the entire model,
+> and train via GRPO reinforcement learning with real `g++` compile-and-run rewards.
+
+如果这个项目对你有帮助，或者你觉得有点意思，请点个 ⭐ Star！这对我真的很重要 PwP<br>
+If you find this useful or interesting, please give it a ⭐ Star! Your support means a lot. 🌟
 
 ---
 
@@ -49,48 +73,33 @@ global_v ~ N(0,1) → ΔW 量级爆炸 → 模型输出乱码 → 无法提取�
 
 ## TinyLoRA-Qwen-Coder 实验
 
-本仓库是原「LuoguQwen LoRA 微调」，一个[基于 SFT的项目](https://github.com/Chi-Shan0707/Qwen4Luogu-SFT)以及[强化学习项目](https://github.com/Chi-Shan0707/Qwen4Luogu-RL)的进阶进化版：
+本仓库是 [Qwen4Luogu-SFT](https://github.com/Chi-Shan0707/Qwen4Luogu-SFT) → [Qwen4Luogu-RL](https://github.com/Chi-Shan0707/Qwen4Luogu-RL) 的进阶进化版，也是论文 **"Learning to Reason in 13 Parameters"** 的非官方复现与变体实验。
 
-*以下是SFT时的心路历程*<br>
-> 什么，你问我为什么要挑选 Qwen2.5-1.5B-Instruct 进行微调？<br>
-> —— 那当然是因为它参数量小啦。<br>
->
-> 什么，你继续问我为什么不挑选 Qwen2.5-Coder-1.5B-Instruct 进行微调？<br>
-> ~~我如果在这阿里进行过代码训练上的模型进行微调，哪能看得出我微调的效果？~~<br>
-> ~~好吧，其实是我问千问有什么参数量小的模型，它推荐了这个，然后我一时间忘记继续去搜集信息，直接开搞惹，结果训练到一半才在 ModelScope 上刷到 Qwen2.5-Coder-1.5B-Instruct。PWP~~<br>
-> ~~第一遍实在太差了，反正还要再训练一遍，还是弄 Qwen2.5-Coder-1.5B-Instruct 吧~~<br>
-> 这个也太差劲了，上 7B 吧 PwP<br>
-> *不对，为什么疯狂报 mismatch 啊啊？从 1.5B→7B 我啥都没改啊？*<br>
-> *疯狂 debug，疯狂研究格式……*<br>
-> 算了，格式弄成所谓的标准型吧。<br>
-> 7B 根本跑不动啊，只能 3B。<br>
-> ~~啊训练完了，参数根本上传不动啊？啊，huggingface 也上传不动啊 PwP~~<br>
+📄 **论文解读与理论推导** → [paper-Learning to Reason in 13 Parameters/](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 
-然后，6号晚上，~~天助我也~~，我看到了TinyLoRA的论文，所以我就开始了这项尝试（或者可以说“复现”），成果见[Qwen4Luogu-RL](https://github.com/Chi-Shan0707/Qwen4Luogu-RL)：
-- 基座：Qwen2.5-Coder-3B-Instruct，4bit 量化以挤爆最后一点显存；
-- 训练：不用 SFT，用 RL（GRPO）；
-- 数据：Luogu上的题目
-- 参数：全模型只保留 **16 个可训练标量参数**；
-- 任务：用「编译+运行 C++ 代码」的方式在 CodeContests 题目上搞代码强化学习。
+<details>
+<summary>📖 <b>心路历程（展开看作者的踩坑之旅 PwP）</b></summary>
 <br>
 
-在[Qwen4Luogu-RL](https://github.com/Chi-Shan0707/Qwen4Luogu-RL)中，这个`train_rl.py`是可以运行且训练的，但是能成功运行+通过样例测试的，十不存一（并没有夸张）。<br>
-原因可能有:
-- 提示词写的不好，下一步需要明确【是否要推理路径】等细节，并开展Prompt Engineering
-- token数量截取的太少，目前是1024，但是这个也会带来成本
-- GRPO时生成答案数量太少
-- 训练所用的luogu题目太难
-- RL的reward写的不够好
-- 3B模型本身能力不行<br>
+*SFT 时代的故事*：
 
-<br>
+> 什么，你问我为什么要挑选 Qwen2.5-1.5B-Instruct 进行微调？—— 那当然是因为它参数量小啦。<br>
+> 什么，你继续问我为什么不挑选 Qwen2.5-Coder-1.5B-Instruct？<br>
+> ~~其实是我问千问推荐了这个，然后忘记继续搜集信息直接开搞，训练到一半才刷到 Coder 版本 PwP~~<br>
+> ~~第一遍实在太差了，换 Coder 吧~~ → 这个也太差劲了，上 7B 吧 PwP<br>
+> *不对，为什么疯狂报 mismatch 啊？从 1.5B→7B 我啥都没改啊？疯狂 debug……*<br>
+> 7B 根本跑不动，只能 3B → ~~训练完了参数上传不动 PwP~~
 
-所以在这里，我采用了另一个数据集 [deepmind/code_contests](https://huggingface.co/datasets/deepmind/code_contests) ，其具有以下优势：
+然后，6号晚上，~~天助我也~~，我看到了 TinyLoRA 的论文：
 
-> - **题目规模更大**：拥有海量的竞赛级题目。
-> - **英语环境**：适配主流代码模型的训练偏好。
-> - **难度调控**：支持题目难度的精细化筛选。
-> - **测试用例极其丰富**：显著提升模型逻辑验证的准确性。
+- 基座：Qwen2.5-Coder-3B-Instruct，4bit 量化
+- 训练：不用 SFT，用 RL（GRPO）
+- 参数：全模型只保留 **16 个可训练标量参数**
+- 任务：编译+运行 C++ 代码的强化学习
+
+在 [Qwen4Luogu-RL](https://github.com/Chi-Shan0707/Qwen4Luogu-RL) 中能成功通过样例测试的十不存一（并没有夸张），于是换到了 [deepmind/code_contests](https://huggingface.co/datasets/deepmind/code_contests) 数据集 —— 题量大、英语环境、难度可控、测试用例超丰富。
+
+</details>
 
 ---
 
@@ -116,37 +125,24 @@ global_v ~ N(0,1) → ΔW 量级爆炸 → 模型输出乱码 → 无法提取�
 
 ## 项目概述
 
-LuoguQwen-RL 的目标是：
+> 在 4bit 量化代码模型 + 极端参数压缩（u 个参数，default=32）的设置下，通过 GRPO 强化学习让模型在 CodeContests 竞赛题上学会生成能过样例的 C++ 代码。
 
-> 在显存受限（3B 模型 + 4bit 量化）且参数极致压缩（仅 16 个参数）的前提下，
-> 通过强化学习让 Qwen2.5-Coder 在 CodeContests 竞赛题上学会「能过样例」的 C++ 代码生成。
+- 将 TinyLoRA 从数学推理（GSM8K）迁移到**代码生成 + 编译执行奖励**场景
+- 论文经典设置：7B 模型 + 13 参数；当前示例：Qwen-Coder-3B + u=32（默认，可调），保持「极低秩 + 全局共享」精神内核
 
-本仓库并不是凭空设计的，而是一个**TinyLoRA 论文方向的复现与变体实验**：
+**目录结构（节选）**：
 
-- `theory/README.md` 中给出了 TinyLoRA / GRPO 的理论与工程细节梳理；
-- 本项目在此基础上，将 TinyLoRA 的思想从数学推理（如 GSM8K）迁移到**代码生成 + 编译执行奖励**场景；
-- 论文中经典设置是 7B 模型 + 13 个参数，本仓库使用 3B Coder 模型 + 16 个参数，保持「极低秩 + 全局共享」这一精神内核。
-
-核心脚本：
-
-- `train_rl.py`：
-  - 加载 4bit 量化的 `Qwen2.5-Coder-3B-Instruct`；
-  - 将指定 Linear 层替换为自定义 `TinyLoRALinear`，并通过共享向量 `global_v` 实现 TinyLoRA Tiling；
-  - 使用 TRL 的 `GRPOTrainer` 进行代码强化学习；
-  - 奖励来自本地 `g++` 编译 + 测试用例执行通过率。
-- `download_dataset.py`：
-  - 从 DeepMind 的 `code_contests` 数据集（AlphaCode）中流式下载、过滤并保存为本地 JSONL 格式。
-- `verify_pipeline.py`：
-  - 用于验证模型加载、生成、代码提取与编译运行的端到端流水线（示例：加载模型并尝试用给定样例对生成代码进行编译运行评测）。
-
-目录结构（节选）：
-
-- `train_rl.py`：主训练脚本（TinyLoRA + GRPO）。
-- `download_dataset.py`：流式下载并预处理 CodeContests 数据。
-- `verify_pipeline.py`：验证 model->generate->extract->compile 流程的脚本。
-- `local_code_contests/`：本地存储的 CodeContests 训练/验证/测试数据（JSONL 格式）。
-- `models/Qwen2.5-Coder-3B-Instruct/`：基座模型目录（可通过 ModelScope 自动下载）。
-- `output/`：RL 训练输出目录（包括最终的 `tiny_lora_v.pt`，内含 `global_v` 向量及重建所需的元信息）。
+```
+train_rl.py          # 主训练脚本（TinyLoRA + GRPO）
+utils.py             # 共享工具（TinyLoRA 类、代码评估、模型加载）
+validate.py          # 验证脚本（可独立运行 / 被 train_rl.py 调用）
+test.py              # 测试脚本（支持 baseline 对比）
+download_dataset.py  # 流式下载 CodeContests 数据
+verify_pipeline.py   # 端到端流水线验证
+local_code_contests/ # 本地 JSONL 数据（train/valid/test）
+models/              # 基座模型目录
+output/              # 训练输出（tiny_lora_v.pt）
+```
 
 ---
 ## 项目结构
@@ -308,8 +304,8 @@ utils.py (基础工具)
 | 特性 | 原论文设置 (Paper) | 本项目适配 (Ours) |
 | :--- | :--- | :--- |
 | **任务领域** | [cite_start]数学推理 (GSM8K, MATH) [cite: 8] | **代码竞赛 (CodeContests / AlphaCode)** |
-| **基座模型** | [cite_start]Qwen2.5-7B / Llama-3 [cite: 64] | **Qwen2.5-Coder-3B-Instruct** |
-| **参数量** | 13 参数 ($u=13$) | **16 参数 ($u=16$)** （可调）|
+| **基座模型** | [cite_start]Qwen2.5-7B / Llama-3 [cite: 64] | **Qwen2.5-Coder-3B-Instruct（示例）** |
+| **参数量** | 13 参数 ($u=13$) | **u 个参数（default=32，可调）** |
 | **精度处理** | [cite_start]BF16 / FP32 [cite: 8] | **4-bit 量化 (NF4) + 动态反量化 SVD** |
 | **奖励机制** | 答案匹配 (Exact Match) | **g++ 编译 + 测试用例运行 (RLVR)** |
 | **显存优化** | 需高显存 (A100/H100) | **适配单卡消费级 GPU (16GB+)** |
@@ -922,57 +918,31 @@ $$\text{reward} = \begin{cases} 0 & \text{编译失败 / 无代码} \\ 0.5 & \te
 
 ## English Version
 
-### TinyLoRA-Qwen-Coder Experiment
+> **TL;DR** — We RL-fine-tune a **3B code model with only 32 trainable scalar parameters** and confirm that the weight increment actually changes model output. An unofficial adaptation of the [TinyLoRA paper](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md) from math → competitive programming.
 
+Evolved from [LuoguQwen SFT](https://github.com/Chi-Shan0707/Qwen4Luogu-SFT) and [Qwen4Luogu-RL](https://github.com/Chi-Shan0707/Qwen4Luogu-RL).
 
-TinyLoRA-Qwen-CoderL is an advanced evolution of the original [LuoguQwen SFT project](https://github.com/Chi-Shan0707/Qwen4Luogu-SFT) and [Qwen4Luogu-RL project](https://github.com/Chi-Shan0707/Qwen4Luogu-RL).
-
-### Changelog
+<details>
+<summary><strong>Changelog</strong></summary>
 
 #### v2.5 — Critical Bug Fixes
 
-This release fixes three critical bugs that caused **zero gradients during training and zero code extraction during testing**:
+Fixed three bugs that caused **zero gradients and zero code extraction**:
 
-| # | Bug | Impact | Fix |
-| :---: | :--- | :--- | :--- |
-| **1** | `global_v` initialized with `randn` instead of `zeros` | Every linear layer received a massive random perturbation ($\Delta W$ magnitude ~400) from the first forward pass, turning model outputs into gibberish. No code could be extracted, all GRPO rewards were 0, gradients were 0, and `v` was never updated. | `utils.py`: Changed `TinyLoRAGlobalParams.__init__` to use `torch.zeros(...)` |
-| **2** | Random seed misalignment between training and testing | During training, seed was set *immediately before* `apply_tiny_lora`. During testing, seed was set *before model loading*, which consumes extensive random state, causing P matrices to differ. The trained `v` vector paired with wrong P matrices produced incorrect $\Delta W$. | `test.py`: Re-seed right before `apply_tiny_lora` call |
-| **3** | P matrix missing $1/\sqrt{r}$ scaling | Poor gradient magnitude conditioning; the paper recommends a scaling factor for variance stability. | `utils.py`: P matrix generation now divides by `rank ** 0.5` |
+| # | Bug | Fix |
+| :---: | :--- | :--- |
+| **1** | `global_v` initialized with `randn` (ΔW exploded) | Changed to `torch.zeros(...)` |
+| **2** | Seed set before model loading (P matrix mismatch) | Re-seed right before `apply_tiny_lora` |
+| **3** | P matrix missing $1/\sqrt{r}$ scaling | Added `rank ** 0.5` divisor |
 
-**Symptom chain (v2.0 and earlier):**
-```
-global_v ~ N(0,1) → ΔW explodes → model outputs gibberish → no code extracted
-→ all rewards = 0 → GRPO advantage = 0/0 → grad_norm = 0, loss = 0
-→ v never updates → saved checkpoint still random → test also fails
-```
+> **v2.5 checkpoints are incompatible with earlier versions.**
 
-> **Important**: v2.5 changes P matrix scaling and `global_v` initialization. Checkpoints (`.pt` files) from previous versions are **incompatible** and require retraining.
+#### v2.0 — Modular Refactor
+- Extracted `utils.py`, added `validate.py` and `test.py`
+- In-training validation with auto best-model saving
+- Baseline testing (`--baseline`)
 
-#### v2.0 — Modular Refactor & Validation System
-- Extracted shared utilities into `utils.py`
-- Added `validate.py` and `test.py`
-- Support for in-training validation with automatic best model saving
-- Support for baseline testing (`--baseline`)
-
-The goal of 
-TinyLoRA-Qwen-Coder is:
-> Under the constraints of extremely limited VRAM (3B model + 4bit quantization) and extreme parameter compression (only 16 trainable parameters), train Qwen2.5-Coder through Reinforcement Learning (RL) to generate C++ code that passes sample tests on CodeContests competitive programming problems.
-
-This repository is an **unofficial reproduction and adaptation of the TinyLoRA paper**:
-- `theory/README.md` provides theoretical insights into TinyLoRA / GRPO.
-- We extend TinyLoRA from mathematical reasoning (GSM8K) to **code generation + compile-and-run rewards**.
-- While the paper uses 7B models with 13 parameters, we use a 3B Coder model with 16 parameters, maintaining the "extreme low-rank + global sharing" core philosophy.
-
-Currently, `train_rl.py` is functional, though achieving high pass rates on competitive problems remains a significant challenge due to:
-- Prompt Engineering needs (e.g., explicit reasoning paths).
-- Context window limitations (currently 1024 tokens).
-- Group size (G) in GRPO vs. complexity of problems.
-- Base model capacity (3B).
-
-**Core Scripts:**
-- `train_rl.py`: Main training script using 4-bit `Qwen2.5-Coder-3B-Instruct`, TinyLoRA Tiling, and `GRPOTrainer` with `g++` compilation rewards.
-- `download_dataset.py`: Stream-downloads and prepocesses the `deepmind/code_contests` (AlphaCode) dataset.
-- `verify_pipeline.py`: Validates the end-to-end flow of model loading, generation, extraction, and compilation.
+</details>
 
 ### Paper Reproduction
 
@@ -989,17 +959,18 @@ At such extreme parameter scales (<100 parameters), Supervised Fine-Tuning (SFT)
 | Feature | Paper Setting | Our Adaptation |
 | :--- | :--- | :--- |
 | **Domain** | Math Reasoning (GSM8K, MATH) | **Code Competitions (CodeContests)** |
-| **Base Model** | Qwen2.5-7B / Llama-3 | **Qwen2.5-Coder-3B-Instruct** |
-| **Parameters** | 13 parameters ($u=13$) | **16 parameters ($u=16$)**（can be changed） |
+| **Base Model** | Qwen2.5-7B / Llama-3 | **Qwen2.5-Coder-3B-Instruct** (or any model with SVD decomposable layers) |
+| **Parameters** | 13 parameters ($u=13$) | **Configurable** ($u=32$ by default, can be adjusted) |
 | **Precision** | BF16 / FP32 | **4-bit (NF4) + Dynamic Dequant SVD** |
 | **Reward** | Exact Match | **g++ Compile + Test Case Execution** |
 | **Optimization**| High-end GPUs (A100/H100) | **Consumer GPUs (16GB+ VRAM)** |
 
 ---
 
-## Project Structure
+<details>
+<summary><strong>Project Structure (click to expand)</strong></summary>
 
-This project adopts a modular design, separating training, validation, and testing logic for better maintainability and reproducibility.
+## Project Structure
 
 ### Core Modules
 
@@ -1113,7 +1084,12 @@ utils.py (base utilities)
 
 All scripts depend on shared functionality in `utils.py`, ensuring code consistency and maintainability.
 
+</details>
+
 ---
+
+<details>
+<summary><strong>Validation & Testing Details (click to expand)</strong></summary>
 
 ## Validation & Testing
 
@@ -1238,6 +1214,8 @@ Training and validation save `.pt` files with the following information:
 - **v2.5 Note**: The seed must be set *immediately before* `apply_tiny_lora`, **not** before model loading (model loading consumes random state, causing P matrix mismatch)
 - SVD decomposition is deterministic, so U/S/Vh are fully reproducible
 - With identical `seed`, `u_value`, `rank`, the model can be completely reconstructed
+
+</details>
 
 ---
 
