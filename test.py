@@ -28,7 +28,7 @@ from utils import (
 from tqdm import tqdm
 
 
-def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_contests/code_contests_test.jsonl", baseline=False):
+def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_contests/code_contests_test.jsonl", baseline=False, test_seed=42):
     """
     Test a trained TinyLoRA model or baseline model on the test dataset
     在测试数据集上测试训练好的 TinyLoRA 模型或基座模型
@@ -38,6 +38,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         num_samples: Number of samples to test / 要测试的样本数
         test_data_path: Path to test dataset / 测试数据集路径
         baseline: If True, test base model without TinyLoRA / 如果为 True，测试基座模型（不含 TinyLoRA）
+        test_seed: Random seed for evaluation (sample selection & generation) / 评估用随机种子（样本选择和生成）
     
     Returns:
         dict: Test metrics / 测试指标
@@ -71,16 +72,8 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         print(f"   • model_id / 模型 ID: {model_id}")
         print(f"   • global_v shape / global_v 形状: {global_v.shape}\n")
         
-        # ========== Step 2: Set random seed / 设置随机种子 ==========
-        print(f"🎲 Setting random seed / 正在设置随机种子: {seed}")
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        print(f"   ✅ Random seed set / 随机种子已设置\n")
-    else:
-        print(f"🎲 Setting random seed / 正在设置随机种子: 42")
-        torch.manual_seed(42)
-        torch.cuda.manual_seed(42)
-        print(f"   ✅ Random seed set / 随机种子已设置\n")
+        # ========== Step 2: Note training seed (used only for P matrix reproduction) / 记录训练种子（仅用于 P 矩阵复现） ==========
+        print(f"🎲 Checkpoint training seed / 检查点训练随机种子: {seed} (used for TinyLoRA P matrix reproduction / 用于 TinyLoRA P 矩阵复现)")
     
     # ========== Step 3: Load base model / 加载基座模型 ==========
     # Check if model exists locally / 检查模型是否存在于本地
@@ -133,7 +126,16 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         print(f"   • Trainable parameters / 可训练参数: {trainable_params}")
         print(f"   • Compression ratio / 压缩比: {all_params / trainable_params:.1f}x\n")
     
-    # ========== Step 6: Load test dataset / 加载测试数据集 ==========
+    # ========== Step 5b: Set test seed for evaluation / 设置评估用随机种子 ==========
+    print(f"🎲 Setting test seed for evaluation / 正在设置评估随机种子: {test_seed}")
+    torch.manual_seed(test_seed)
+    torch.cuda.manual_seed(test_seed)
+    import random, numpy as np
+    random.seed(test_seed)
+    np.random.seed(test_seed)
+    print(f"   ✅ Test seed set / 评估随机种子已设置\n")
+
+    # ========== Step 6: Load test dataset / 加载测试数据集 ===========
     print(f"📁 Loading test dataset / 正在加载测试数据集...")
     print(f"   Path / 路径: {test_data_path}\n")
     
@@ -298,6 +300,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Test base model without TinyLoRA (for comparison) / 测试基座模型（不含 TinyLoRA，用于对比）"
     )
+    parser.add_argument(
+        "--test_seed",
+        type=int,
+        default=42,
+        help="Random seed for evaluation (sample selection & generation) / 评估用随机种子（样本选择和生成），默认 42"
+    )
     
     args = parser.parse_args()
     
@@ -306,14 +314,16 @@ if __name__ == "__main__":
     if not args.baseline:
         print(f"   Checkpoint / 检查点: {args.checkpoint_path}")
     print(f"   Samples / 样本数: {args.num_samples}")
-    print(f"   Test Data / 测试数据: {args.test_data}\n")
+    print(f"   Test Data / 测试数据: {args.test_data}")
+    print(f"   Test Seed / 评估随机种子: {args.test_seed}\n")
     
     # Run testing / 运行测试
     results = test_model(
         checkpoint_path=args.checkpoint_path,
         num_samples=args.num_samples,
         test_data_path=args.test_data,
-        baseline=args.baseline
+        baseline=args.baseline,
+        test_seed=args.test_seed
     )
     
     print(f"✅ Testing complete! / 测试完成！")

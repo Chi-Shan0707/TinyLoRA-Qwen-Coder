@@ -181,7 +181,8 @@ print("Start replacing/正在应用 TinyLoRA Tiling (参数共享)...")
 print("It's normal to see many lines of 'replace'./看到很多替换日志是正常的。")
 # 【关键】固定随机种子，确保 P 矩阵可复现
 # 保存模型时只存 v 向量，加载时需要用相同种子重建 P 矩阵
-TINYLORA_SEED = 42
+
+TINYLORA_SEED = 212
 torch.manual_seed(TINYLORA_SEED)
 torch.cuda.manual_seed(TINYLORA_SEED)
 print(f"✅ Fix TinyLoRA seed/已固定 TinyLoRA 随机种子: {TINYLORA_SEED}")
