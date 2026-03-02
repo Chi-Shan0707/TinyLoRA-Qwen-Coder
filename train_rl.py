@@ -140,6 +140,15 @@ tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
 
+# ========== Multi-GPU / DDP Support ==========
+# ========== 多卡 / DDP 支持 ==========
+# When using torchrun (DDP), each process must load the FULL model on its own GPU.
+# device_map="auto" would split the model across GPUs, conflicting with DDP.
+# 使用 torchrun (DDP) 时，每个进程必须在自己的 GPU 上加载完整模型。
+# device_map="auto" 会将模型分片到多张 GPU 上，与 DDP 冲突。
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
+print(f"🖥️ LOCAL_RANK: {LOCAL_RANK}")
+
 # ========== Load model =====
 
 # ========== 加载模型（4bit 量化）==========
@@ -152,7 +161,7 @@ bnb_config = BitsAndBytesConfig(
 model = AutoModelForCausalLM.from_pretrained(
     LOCAL_MODEL_DIR,
     quantization_config=bnb_config,
-    device_map="auto",
+    device_map={"":  LOCAL_RANK},  # 多卡DDP: 每个rank加载完整模型到自己的GPU / Multi-GPU DDP: each rank loads full model on its own GPU
     trust_remote_code=True,
     # torch_dtype=torch.bfloat16,
     dtype=torch.bfloat16,
@@ -168,8 +177,9 @@ model = prepare_model_for_kbit_training(model)
 # Note: TinyLoRA classes are now imported from utils.py
 # 注意：TinyLoRA 类现在从 utils.py 导入
 
-# 获取模型第一层的设备 (通常是 cuda:0)
-device = model.model.layers[0].self_attn.q_proj.weight.device
+# 获取当前 rank 对应的 GPU 设备
+# Get the GPU device for current rank
+device = torch.device(f"cuda:{LOCAL_RANK}")
 print(f"Model device/模型主设备: {device}")
 
 # 创建全局参数容器
