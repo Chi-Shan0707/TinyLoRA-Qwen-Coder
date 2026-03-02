@@ -1,92 +1,101 @@
 <div align="center">
 
-# 📄 Learning to Reason in 13 Parameters
+# 📄 TinyLoRA Paper Hub
 
-**Paper Notes & Theory Reference / 论文笔记与理论参考**
+**Learning to Reason in 13 Parameters — Notes, adaptation map, and technical guide**
 
 [![Paper](https://img.shields.io/badge/arXiv-2602.04118-b31b1b)](https://arxiv.org/abs/2602.04118)
 [![PDF](https://img.shields.io/badge/PDF-Local_Copy-blue)](./2602.04118v1.pdf)
 
-[⬅ Back to Main Project / 返回主项目](../README.md)
+[⬅ Back to Main Project](../README.md)
 
 </div>
 
----
-
-## What is TinyLoRA? / TinyLoRA 是什么？
-
-TinyLoRA is an extreme parameter-efficient fine-tuning method that enables language models to learn reasoning capabilities with as few as **13 trainable parameters** (26 bytes in bf16).
-
-TinyLoRA 是一种极端参数高效微调方法，仅用 **13 个可训练参数**（bf16 下仅 26 字节）就能让语言模型学会推理。
-
-### Core Idea / 核心思想
-
-$$W' = W + U \Sigma \left(\sum_{i=1}^{u} v_i P_i\right) V^\top$$
-
-- $U, \Sigma, V$：来自原权重 SVD 分解的冻结骨架 / Frozen skeleton from SVD of original weights
-- $P_i$：固定随机投影矩阵 / Fixed random projection matrices
-- $v$：**唯一的可训练参数** / **The only trainable parameters**
+**Language / 语言**: [English](#english) | [中文](#中文)
 
 ---
 
-## Key Findings / 关键发现
+## English
 
-| Finding | Details |
-| :--- | :--- |
-| 🔢 **13 params, 91% accuracy** | GSM8K with Qwen2.5-7B-Instruct — only 13 trained parameters |
-| 📉 **1000x compression** | Recovers 90% of full fine-tuning improvement with 1000x fewer params |
-| 🎯 **RL >> SFT** | At <100 params, SFT completely fails; only RL (GRPO) works |
-| 🧠 **Bigger = Better** | Larger models (Qwen) are more parameter-efficient than smaller ones (LLaMA) |
+### Why this folder exists
 
----
+This folder bridges theory and implementation for TinyLoRA:
+- what the original paper proves,
+- what this repository adapts for code generation,
+- and how to reproduce/debug the method in practice.
 
-## Why RL, Not SFT? / 为什么用 RL 而不是 SFT？
+### Fast Links
 
-| | SFT (监督微调) | RL (强化学习) |
+- Full technical guide (English, default): [TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md)
+- 技术文档（中文）: [TECHNICAL_GUIDE_CN.md](./TECHNICAL_GUIDE_CN.md)
+- Original paper PDF (local): [2602.04118v1.pdf](./2602.04118v1.pdf)
+- Main repository: [../README.md](../README.md)
+
+### Core idea (one equation)
+
+$$W' = W + U\Sigma\left(\sum_{i=1}^{u} v_i P_i\right)V^\top$$
+
+- Freeze SVD skeleton (`U, Σ, V`)
+- Keep random projection bases (`P`) fixed
+- Train only tiny shared vector (`v`)
+
+### What our repo adapts
+
+| Dimension | Paper | This Repository |
 | :--- | :--- | :--- |
-| **学什么** | 模仿参考答案的格式+内容 | 只关心最终结果的对错 |
-| **所需容量** | 高（需记忆格式噪声） | 低（仅编码逻辑信号） |
-| **极小参数下** | 完全失效 | ✅ 依然有效 |
+| Task | Math reasoning | Competitive code generation |
+| Reward | Exact match | `g++` compile + testcase execution |
+| Params | 13 (example) | configurable (`u`, default often 32) |
+| Precision | BF16/FP32 | 4-bit NF4 or BF16 (`--no_quant`) |
 
-> SFT 强迫模型记忆 "Noise"（行文风格、格式），RL 只传递 "Signal"（对/错）。
-> 所以在仅有 13 个参数时，SFT 准确率 83%，而 RL 达到 91%。
+### Suggested reading order
 
----
-
-## Performance Comparison / 性能对比
-
-| Method | Parameters | GSM8K Accuracy |
-| :--- | :---: | :---: |
-| Full Fine-Tuning | 7B+ | 95% |
-| LoRA (r=1) | ~3M | 94% |
-| LoRA-XS (r=1) | ~100K | 93% |
-| **TinyLoRA (RL)** | **13** | **91%** |
-| TinyLoRA (SFT) | 13 | 83% |
+1. Main README: project setup and runnable workflow
+2. Technical Guide: mechanism and implementation details
+3. Paper PDF: original experimental evidence
 
 ---
 
-## How We Use It / 我们如何使用
+## 中文
 
-本项目在 TinyLoRA 基础上进行了适配：
+### 这个目录的作用
 
-| Feature | Original Paper | Our Adaptation |
+本目录用于把 TinyLoRA 的**理论、工程实现、复现要点**连接起来：
+- 论文到底证明了什么，
+- 本仓库在代码任务上做了哪些适配，
+- 实际训练/调试时该关注哪些关键机制。
+
+### 快速入口
+
+- 技术文档（英文默认）：[TECHNICAL_GUIDE.md](./TECHNICAL_GUIDE.md)
+- 技术文档（中文）：[TECHNICAL_GUIDE_CN.md](./TECHNICAL_GUIDE_CN.md)
+- 论文本地 PDF：[2602.04118v1.pdf](./2602.04118v1.pdf)
+- 返回主仓库：[../README.md](../README.md)
+
+### 核心公式
+
+$$W' = W + U\Sigma\left(\sum_{i=1}^{u} v_i P_i\right)V^\top$$
+
+- 冻结 SVD 骨架（`U, Σ, V`）
+- 固定随机投影基（`P`）
+- 只训练极小共享向量（`v`）
+
+### 本仓库适配点
+
+| 维度 | 论文 | 本仓库 |
 | :--- | :--- | :--- |
-| **Task** | Math (GSM8K, MATH) | **Code Competitions (CodeContests)** |
-| **Model** | Qwen2.5-7B / Llama-3 | **Qwen2.5-Coder-3B-Instruct** |
-| **Params** | 13 ($u=13$) | **32 ($u=32$)**, adjustable |
-| **Precision** | BF16 / FP32 | **4-bit NF4 + Dequant SVD** |
-| **Reward** | Exact Match | **g++ Compile + Test Execution** |
+| 任务 | 数学推理 | 竞赛代码生成 |
+| 奖励 | 答案匹配 | `g++` 编译 + 测试运行 |
+| 参数量 | 13（示例） | 可配置（`u`，常用 32） |
+| 精度 | BF16/FP32 | 4-bit NF4 或 BF16（`--no_quant`） |
+
+### 建议阅读顺序
+
+1. 主 README：先跑通全流程
+2. 技术文档：理解机制与关键实现
+3. 原论文 PDF：查看原始实验结论
 
 ---
-
-## Further Reading / 深入阅读
-
-- 📝 [详细理论推导与工程解析 (explain.md)](./explain.md) — 从 SVD 到 Tiling 的完整数学推导，GRPO 流程细节
-- 📄 [原论文 PDF](./2602.04118v1.pdf)
-
----
-
-## Citation / 引用
 
 ```bibtex
 @article{morris2026learning,
@@ -96,8 +105,6 @@ $$W' = W + U \Sigma \left(\sum_{i=1}^{u} v_i P_i\right) V^\top$$
   year={2026}
 }
 ```
-
----
 
 <div align="center">
 

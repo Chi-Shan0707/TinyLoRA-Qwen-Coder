@@ -37,7 +37,7 @@ print("   --val_steps: Run validation every N steps (default: 100)")
 print("   --val_samples: Number of validation samples (default: 10)\n")
 
 # ========== argument parsing ==========
-# ========== 命令行参数：u 值、最大样本数、验证参数 ==========
+# ========== 命令行参数：u 值、最大样本数 ==========
 U_VALUE = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 16
 MAX_SAMPLES = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 2000
 
