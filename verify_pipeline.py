@@ -1,14 +1,26 @@
 import torch
 import os
-import re
-import json
 import subprocess
-import tempfile
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+
+# Import all shared utilities from utils.py — single source of truth for all pipeline stages
+# 从 utils.py 导入所有共享工具 — 训练/验证/测试/流水线验证的单一真相来源
+from utils import (
+    compile_and_run,
+    extract_code_from_response,
+    convert_hf_tests_to_list,
+    apply_chat_template,
+    get_model_and_tokenizer,
+)
 
 # ==================== 配置区域 ====================
 MS_MODEL_ID = "qwen/Qwen2.5-Coder-3B-Instruct"
 LOCAL_MODEL_DIR = "./models/Qwen2.5-Coder-3B-Instruct"
+
+# Multi-GPU / DDP: LOCAL_RANK is read from environment by get_model_and_tokenizer internally.
+# It uses device_map={"":LOCAL_RANK} so each rank holds the full model on its own GPU.
+# See utils.py get_model_and_tokenizer for the full DDP-safe implementation.
+# 多卡 / DDP：LOCAL_RANK 由 get_model_and_tokenizer 内部读取并处理，这里仅用于日志显示。
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
 
 # 【关键】使用 CodeContests 数据结构进行测试
 # 这里使用一个简单的括号匹配问题作为测试题（来自实际数据集）
@@ -48,71 +60,6 @@ Example is self-explanatory.""",
 def print_step(title):
     print(f"\n{'='*10} {title} {'='*10}")
 
-def extract_code(completion):
-    """从回复中提取代码，逻辑同 train_rl.py"""
-    # 优先匹配代码块
-    match = re.search(r"```(?:cpp|c\+\+)?\n(.*?)```", completion, re.DOTALL)
-    if match:
-        return match.group(1), "Code Block"
-    # 兜底匹配 #include
-    elif "#include" in completion:
-        return completion, "Raw Text"
-    else:
-        return None, "Failed"
-
-def compile_and_run(code, test_cases):
-    """编译并运行，逻辑同 train_rl.py"""
-    # 移除 freopen，防止卡死
-    code = re.sub(r'freopen\s*\(.*?\);', '', code, flags=re.IGNORECASE)
-    
-    with tempfile.TemporaryDirectory() as temp_dir:
-        src_file = os.path.join(temp_dir, "solution.cpp")
-        exe_file = os.path.join(temp_dir, "solution")
-        
-        # 写入
-        with open(src_file, 'w', encoding='utf-8') as f:
-            f.write(code)
-            
-        print(f"   -> 正在编译临时文件...")
-        # 编译
-        try:
-            res = subprocess.run(
-                ['g++', src_file, '-o', exe_file, '-O2'],
-                capture_output=True, text=True, timeout=5
-            )
-            if res.returncode != 0:
-                return 0.0, f"编译失败:\n{res.stderr}"
-        except Exception as e:
-            return 0.0, f"编译异常: {e}"
-
-        # 运行测试用例
-        passed = 0
-        total = len(test_cases)
-        for i, case in enumerate(test_cases):
-            input_data = case['input']
-            expected_output = case['output'].strip()
-            
-            try:
-                res = subprocess.run(
-                    [exe_file],
-                    input=input_data,
-                    capture_output=True,
-                    text=True,
-                    timeout=2 # 2秒超时
-                )
-                actual_output = res.stdout.strip()
-                
-                if actual_output == expected_output:
-                    print(f"   -> Case {i+1}: ✅ 通过 (输入: '{input_data.strip()}' | 预期: '{expected_output}' | 实际: '{actual_output}')")
-                    passed += 1
-                else:
-                    print(f"   -> Case {i+1}: ❌ 失败 (输入: '{input_data.strip()}' | 预期: '{expected_output}' | 实际: '{actual_output}')")
-            except subprocess.TimeoutExpired:
-                print(f"   -> Case {i+1}: ⚠️ 运行超时 (Timeout)")
-            except Exception as e:
-                print(f"   -> Case {i+1}: ⚠️ 运行错误 {e}")
-        
-        return passed / total, "Success"
 
 def main():
     print_step("STEP 1: 加载模型与Tokenizer")
@@ -125,70 +72,25 @@ def main():
         print("❌ 未检测到 g++，请先安装 (sudo apt install g++)")
         return
 
-    # 加载 Tokenizer
     model_path = LOCAL_MODEL_DIR if os.path.exists(LOCAL_MODEL_DIR) else MS_MODEL_ID
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    tokenizer.pad_token = tokenizer.eos_token
-    
-    # 加载模型 (4-bit)
-    print(f"正在加载模型: {model_path} (4-bit)...")
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        quantization_config=bnb_config,
-        device_map="auto",
-        trust_remote_code=True,
-    )
-    print("✅ 模型加载完成")
+    print(f"🖥️ LOCAL_RANK: {LOCAL_RANK}")
+
+    # Use get_model_and_tokenizer from utils.py:
+    #   - device_map={{"":LOCAL_RANK}}: DDP-safe, each process holds full model on its own GPU
+    #   - torch_dtype=bfloat16: non-quantized layers (Embedding/LayerNorm) use BF16, not FP32
+    #   - for_inference=True: enables KV cache, skips gradient checkpointing
+    # 使用 utils.py 的 get_model_and_tokenizer：
+    #   - device_map={{"":LOCAL_RANK}}：DDP 安全，每个进程在自己 GPU 持有完整模型
+    #   - torch_dtype=bfloat16：非量化层使用 BF16，不退化为 FP32
+    #   - for_inference=True：启用 KV cache，跳过梯度检查点
+    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=True, for_inference=True)
 
     # ------------------------------------------------------------------
     print_step("STEP 2: 验证 Chat Template (JSON -> Qwen Prompt)")
     
-    # 模拟 train_rl.py 中的 apply_chat_template 逻辑
-    description = TEST_DATA_JSON.get('description', '')
-    public_tests = TEST_DATA_JSON.get('public_tests', {})
-    
-    # Build public test cases section / 构建公开测试用例部分
-    public_tests_section = ""
-    if isinstance(public_tests, dict) and 'input' in public_tests and 'output' in public_tests:
-        inputs = public_tests['input'] if isinstance(public_tests['input'], list) else [public_tests['input']]
-        outputs = public_tests['output'] if isinstance(public_tests['output'], list) else [public_tests['output']]
-        
-        if inputs and outputs:
-            public_tests_section = "\n【Cases】\n"
-            for i, (inp, out) in enumerate(zip(inputs, outputs), 1):
-                public_tests_section += f"Test {i}:\n"
-                public_tests_section += f"Input :\n{inp}\n"
-                public_tests_section += f"Output:\n{out}\n"
-    
-    # Combine into final prompt / 组合成最终提示
-    raw_prompt = f"""You will be given a programming contest problem. Please reason step by step and provide a complete C++ implementation.
-Output the solution in a code block. Do not include debugging info or extra output. Limit reasoning to 128 tokens.
-
-
-【Problem Description 】
-{description}
-
-{public_tests_section}
-
-Please provide your C++ solution :"""
-    
-    messages = [
-        {"role": "system", "content": "You are an expert competitive programmer. Output valid C++ code that compiles and solves the problem correctly."},
-        {"role": "user", "content": raw_prompt}
-    ]
-    
-    # 应用模版
-    final_prompt = tokenizer.apply_chat_template(
-        messages, 
-        tokenize=False, 
-        add_generation_prompt=True
-    )
+    # Use apply_chat_template from utils.py — identical logic to training, guarantees distribution consistency
+    # 使用 utils.py 的 apply_chat_template — 与训练时完全相同的逻辑，保证 prompt 分布一致
+    final_prompt = apply_chat_template(TEST_DATA_JSON, tokenizer)['prompt']
     
     print("--- 最终输入给模型的 Prompt 开头部分 ---")
     print(final_prompt[:300] + "...\n")
@@ -235,33 +137,32 @@ Please provide your C++ solution :"""
     # ------------------------------------------------------------------
     print_step("STEP 4: 验证代码提取与评测 (基于 CodeContests 格式)")
     
-    extracted_code, method = extract_code(response_only)
-    
-    # Parse test cases from CodeContests format / 从 CodeContests 格式解析测试用例
+    # Use extract_code_from_response from utils.py (returns str, empty string if not found)
+    # 使用 utils.py 的 extract_code_from_response（返回 str，未找到时返回空字符串）
+    extracted_code = extract_code_from_response(response_only)
+
+    # Use convert_hf_tests_to_list from utils.py — same parsing as training reward function
+    # 使用 utils.py 的 convert_hf_tests_to_list — 与训练奖励函数解析逻辑完全一致
     test_cases = []
     for test_type in ['public_tests', 'private_tests', 'generated_tests']:
-        test_data = TEST_DATA_JSON.get(test_type, {})
-        if isinstance(test_data, dict) and 'input' in test_data and 'output' in test_data:
-            inputs = test_data['input'] if isinstance(test_data['input'], list) else [test_data['input']]
-            outputs = test_data['output'] if isinstance(test_data['output'], list) else [test_data['output']]
-            for inp, out in zip(inputs, outputs):
-                test_cases.append({'input': inp, 'output': out})
-    
+        test_cases.extend(convert_hf_tests_to_list(TEST_DATA_JSON.get(test_type, {})))
+
     if extracted_code:
-        print(f"✅ 成功提取代码 (方式: {method})")
+        print(f"✅ 成功提取代码")
         print(f"正在使用 {len(test_cases)} 个测试用例进行评测...")
-        
-        # 实际运行评测
-        score, msg = compile_and_run(extracted_code, test_cases)
-        
+
+        # Use compile_and_run from utils.py (returns float: 0.0 / 0.5 / 1.0)
+        # 使用 utils.py 的 compile_and_run（返回 float：0.0 / 0.5 / 1.0），与训练奖励函数完全相同
+        score = compile_and_run(extracted_code, test_cases)
+
         print(f"\n📊 最终得分 (Reward): {score}")
-        
+
         if score == 1.0:
             print("🎉 结论：Pipeline 完美通过！模型成功解出了题目。")
         elif score > 0.0:
             print("⚠️ 结论：Pipeline 通畅，代码可运行，但部分用例未通过 (这是 RL 训练需要解决的问题)。")
         else:
-            print(f"⚠️ 结论：代码编译失败或运行全错。详细信息: {msg}")
+            print("⚠️ 结论：代码编译失败或运行全错。")
             print("注意：对于未微调的 3B 模型，第一次做对竞赛题目可能有挑战。只要编译过程没报错，Pipeline 就是好的。")
     else:
         print("❌ 代码提取失败！模型可能没生成代码块。")
