@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/License-CC_BY_4.0-green)](./LICENSE)
 [![Model](https://img.shields.io/badge/Base-Qwen2.5--Coder--3B--Instruct-purple)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct)
 [![Dataset](https://img.shields.io/badge/Data-CodeContests_(AlphaCode)-orange)](https://huggingface.co/datasets/deepmind/code_contests)
-![Version](https://img.shields.io/badge/Version-2.5-red)
+![Version](https://img.shields.io/badge/Version-3.0-red)
 
 <br>
 
@@ -41,6 +41,24 @@ If you find this useful or interesting, please give it a ⭐ Star! Your support 
 ---
 
 ## 更新日志 / Changelog
+
+### v3.0 — 多卡稳定性 & 量化开关统一（Issue #001 总结）
+
+本次版本记录了你与 Claude Opus 4.6 的核心排障结论，并将修复完整落地到训练/验证/测试全流程。
+
+| # | 对话结论（根因） | 影响 | v3.0 落地 |
+| :---: | :--- | :--- | :--- |
+| **1** | 多卡下手动 `dequantize_4bit` + `F.linear` 可能遇到 non-contiguous BF16 张量，触发 `CUBLAS_STATUS_NOT_SUPPORTED` | 单卡可跑，多卡/集群不稳定 | `TinyLoRALinear` 量化路径改为委托 bitsandbytes 原生前向；TinyLoRA 增量分支显式 `.contiguous()` |
+| **2** | DDP 场景使用 `device_map="auto"` 与按 rank 独立持模策略冲突 | torchrun 多卡下设备映射风险 | 统一按 `LOCAL_RANK` 放置模型，确保每个 rank 在本地 GPU 持有完整模型 |
+| **3** | checkpoint 未记录量化状态，测试/验证时可能配置漂移 | 复现实验时结果可能偏移 | 新增量化开关（默认量化，`--no_quant` 禁用）；checkpoint 增加 `is_quantized`，测试/验证阶段读取并提示一致性 |
+
+**v3.0 新能力**：
+- 训练支持：`--no_quant`
+- 验证支持：`--no_quant`
+- 测试支持：`--no_quant`
+- checkpoint 元信息新增：`is_quantized`
+
+> 兼容性：旧 checkpoint 若没有 `is_quantized` 字段，会按 `False` 回退处理。
 
 ### v2.5 — 关键 Bug 修复 (Critical Bug Fixes)
 
@@ -166,7 +184,7 @@ output/              # 训练输出（tiny_lora_v.pt）
   - `convert_hf_tests_to_list()`: 转换测试用例格式
 
 - **模型加载工具**：
-  - `get_model_and_tokenizer()`: 加载 4-bit 量化模型和分词器
+  - `get_model_and_tokenizer()`: 加载模型和分词器（支持 4-bit 或 BF16）
 
 #### 2. `train_rl.py` - 训练脚本
 
@@ -175,6 +193,9 @@ output/              # 训练输出（tiny_lora_v.pt）
 ```bash
 # 基本训练 / Basic training
 python train_rl.py [u_value] [max_samples]
+
+# 非量化训练 / Non-quantized training
+python train_rl.py [u_value] [max_samples] --no_quant
 
 # 带验证的训练 / Training with validation
 python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
@@ -186,6 +207,7 @@ python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
 - `--do_validate`: 启用训练期间验证
 - `--val_steps N`: 每 N 步进行一次验证（默认 100）
 - `--val_samples N`: 验证样本数（默认 10）
+- `--no_quant`: 禁用 4-bit 量化，使用 BF16 加载模型
 
 **验证功能**：
 - 训练期间自动运行验证
@@ -199,6 +221,9 @@ python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
 ```bash
 # 独立验证 / Standalone validation
 python validate.py [num_samples]
+
+# 非量化验证 / Non-quantized validation
+python validate.py [num_samples] --no_quant
 ```
 
 **功能**：
@@ -222,6 +247,7 @@ python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --n
 python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100 # 测试最佳模型
 python test.py --baseline --num_samples 50                                                      # 测试基座模型（对比）
 python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --test_data ./local_code_contests/code_contests_test.jsonl
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --no_quant
 ```
 
 **功能**：
@@ -925,6 +951,22 @@ Evolved from [LuoguQwen SFT](https://github.com/Chi-Shan0707/Qwen4Luogu-SFT) and
 <details>
 <summary><strong>Changelog</strong></summary>
 
+#### v3.0 — Multi-GPU Stability & Unified Quantization Control
+
+This release summarizes the Issue #001 debugging conclusions and applies fixes across the full train/validate/test pipeline.
+
+| # | Root Cause | Impact | v3.0 Fix |
+| :---: | :--- | :--- | :--- |
+| **1** | Manual `dequantize_4bit` + `F.linear` in distributed paths can hit non-contiguous BF16 layouts, causing `CUBLAS_STATUS_NOT_SUPPORTED` | Stable on single GPU, unstable on multi-GPU/cluster | Quantized base forward now delegates to bitsandbytes native path; TinyLoRA delta path enforces contiguous tensors |
+| **2** | `device_map="auto"` can conflict with per-rank DDP loading behavior | Potential multi-GPU placement inconsistency | Unified per-rank placement using `LOCAL_RANK` |
+| **3** | Checkpoints did not store quantization mode | Reproducibility/config drift between training and evaluation | Added `is_quantized` to checkpoint metadata; test/validation now check and warn on mismatch |
+
+**New in v3.0:**
+- Training supports `--no_quant`
+- Validation supports `--no_quant`
+- Testing supports `--no_quant`
+- Checkpoints now include `is_quantized`
+
 #### v2.5 — Critical Bug Fixes
 
 Fixed three bugs that caused **zero gradients and zero code extraction**:
@@ -990,7 +1032,7 @@ Contains all shared functionality for training, validation, and testing:
   - `apply_chat_template()`: Build prompts from problem descriptions
 
 - **Model Loading Utilities**:
-  - `get_model_and_tokenizer()`: Load 4-bit quantized model and tokenizer
+  - `get_model_and_tokenizer()`: Load model and tokenizer (4-bit quantized or BF16)
 
 #### 2. `train_rl.py` - Training Script
 
@@ -999,6 +1041,9 @@ Main training script with optional validation support:
 ```bash
 # Basic training
 python train_rl.py [u_value] [max_samples]
+
+# Non-quantized training (BF16)
+python train_rl.py [u_value] [max_samples] --no_quant
 
 # Training with validation
 python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
@@ -1010,6 +1055,7 @@ python train_rl.py 16 2000 --do_validate --val_steps 100 --val_samples 10
 - `--do_validate`: Enable validation during training
 - `--val_steps N`: Run validation every N steps (default: 100)
 - `--val_samples N`: Number of validation samples (default: 10)
+- `--no_quant`: Disable 4-bit quantized loading and use BF16
 
 **Validation Features:**
 - Automatic validation during training
@@ -1023,6 +1069,9 @@ Can be run standalone or imported by `train_rl.py`:
 ```bash
 # Standalone validation
 python validate.py [num_samples]
+
+# Standalone validation in BF16 mode
+python validate.py [num_samples] --no_quant
 ```
 
 **Features:**
@@ -1044,6 +1093,7 @@ python test.py --baseline --num_samples <N>
 # Examples
 python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
 python test.py --checkpoint_path ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --no_quant
 ```
 
 **Features:**
@@ -1141,6 +1191,9 @@ python validate.py
 
 # Custom number of samples
 python validate.py 50
+
+# Custom samples in BF16 mode
+python validate.py 50 --no_quant
 ```
 
 ### Testing Evaluation
@@ -1159,6 +1212,9 @@ python test.py --baseline --num_samples 50
 
 # Custom test data
 python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --test_data ./local_code_contests/code_contests_test.jsonl
+
+# BF16 (non-quantized) evaluation
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50 --no_quant
 ```
 
 **Baseline Mode (`--baseline`)**:
@@ -1172,11 +1228,12 @@ python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --n
 - `--num_samples`: Number of test samples (default: 50)
 - `--test_data`: Test dataset path
 - `--baseline`: Test base model without TinyLoRA (for comparison with fine-tuned version)
+- `--no_quant`: Disable 4-bit quantized loading and run in BF16
 
 **Testing Flow:**
-1. **Load Checkpoint**: Read metadata from `.pt` file (`seed`, `u_value`, `rank`)
+1. **Load Checkpoint**: Read metadata from `.pt` file (`seed`, `u_value`, `rank`, `is_quantized`)
 2. **Set Random Seed**: Use `torch.manual_seed(seed)` to ensure identical P matrices
-3. **Load Base Model**: Load 4-bit quantized `Qwen2.5-Coder-3B-Instruct`
+3. **Load Base Model**: Load `Qwen2.5-Coder-3B-Instruct` (4-bit by default, or BF16 with `--no_quant`)
 4. **Inject TinyLoRA**: Execute `apply_tiny_lora` with same `u_value` and `seed`
 5. **Load Weights**: Load `global_v` into model
 6. **Run Evaluation**: Generate code on test set and evaluate
@@ -1204,6 +1261,7 @@ Training and validation save `.pt` files with the following information:
     "seed": 42,                          # Random seed (for rebuilding P matrices)
     "model_id": "qwen/Qwen2.5-Coder-3B-Instruct",  # Base model ID
     "total_replaced_layers": 252,       # Number of replaced layers
+  "is_quantized": true,               # Whether training used 4-bit loading
     "validation_score": 0.42,           # Validation score (best_tiny_lora_v.pt only)
     "step": 500,                         # Training step (best_tiny_lora_v.pt only)
 }
@@ -1214,6 +1272,7 @@ Training and validation save `.pt` files with the following information:
 - **v2.5 Note**: The seed must be set *immediately before* `apply_tiny_lora`, **not** before model loading (model loading consumes random state, causing P matrix mismatch)
 - SVD decomposition is deterministic, so U/S/Vh are fully reproducible
 - With identical `seed`, `u_value`, `rank`, the model can be completely reconstructed
+- **v3.0 Note**: If runtime quantization mode differs from checkpoint `is_quantized`, evaluation still runs but may show minor numerical differences
 
 </details>
 

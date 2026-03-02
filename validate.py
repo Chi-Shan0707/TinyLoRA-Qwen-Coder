@@ -147,7 +147,7 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
 if __name__ == "__main__":
     """
     Standalone validation script / 独立验证脚本
-    Usage / 用法: python validate.py
+    Usage / 用法: python validate.py [num_samples] [--no_quant]
     """
     import sys
     from datasets import load_dataset
@@ -157,18 +157,26 @@ if __name__ == "__main__":
     MODEL_PATH = "./models/Qwen2.5-Coder-3B-Instruct"
     CHECKPOINT_PATH = "./output/luoguqwencoder-lora/tiny_lora_v.pt"
     VAL_DATA_PATH = "./local_code_contests/code_contests_valid.jsonl"
-    NUM_SAMPLES = int(sys.argv[1]) if len(sys.argv) > 1 else 10
+    NUM_SAMPLES = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 10
+    USE_QUANT = '--no_quant' not in sys.argv
     
     print(f"\n🚀 Standalone Validation Mode / 独立验证模式")
     print(f"📦 Model Path / 模型路径: {MODEL_PATH}")
     print(f"💾 Checkpoint Path / 检查点路径: {CHECKPOINT_PATH}")
     print(f"📁 Validation Data / 验证数据: {VAL_DATA_PATH}")
-    print(f"🔢 Validation Samples / 验证样本数: {NUM_SAMPLES}\n")
+    print(f"🔢 Validation Samples / 验证样本数: {NUM_SAMPLES}")
+    print(f"📦 Quantization / 量化加载: {'4-bit' if USE_QUANT else 'BF16 (no quant)'}\n")
     
     # Load checkpoint / 加载检查点
     checkpoint = torch.load(CHECKPOINT_PATH, map_location='cpu')
     u_value = checkpoint['u_value']
     seed = checkpoint['seed']
+    
+    # Check quantization state from checkpoint / 从检查点读取量化状态
+    trained_with_quant = checkpoint.get("is_quantized", False)
+    print(f"📌 模型微调时的量化状态: {'4-bit' if trained_with_quant else 'BF16/FP16'}")
+    if USE_QUANT != trained_with_quant:
+        print("⚠️ 警告: 当前验证时的量化状态与训练时不同，可能会有微小精度差异。")
     
     # Set random seed / 设置随机种子
     torch.manual_seed(seed)
@@ -176,7 +184,7 @@ if __name__ == "__main__":
     print(f"✅ Random seed set / 已设置随机种子: {seed}")
     
     # Load model and tokenizer / 加载模型和分词器
-    model, tokenizer = get_model_and_tokenizer(MODEL_PATH)
+    model, tokenizer = get_model_and_tokenizer(MODEL_PATH, use_4bit=USE_QUANT)
     
     # Create global params / 创建全局参数
     device = model.model.layers[0].self_attn.q_proj.weight.device

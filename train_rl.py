@@ -46,6 +46,11 @@ DO_VALIDATE = '--do_validate' in sys.argv
 VAL_STEPS = 100  # Default / 默认值
 VAL_SAMPLES = 10  # Default / 默认值
 
+# Quantization argument / 量化参数
+# --use_quant: enable 4-bit quantized model loading (default: True for backward compatibility)
+# --no_quant: disable quantization, load model in BF16
+USE_QUANT = '--no_quant' not in sys.argv
+
 for i, arg in enumerate(sys.argv):
     if arg == '--val_steps' and i + 1 < len(sys.argv):
         VAL_STEPS = int(sys.argv[i + 1])
@@ -60,6 +65,7 @@ if MAX_SAMPLES is not None:
     print(f"Max training samples / 最大训练样本数: {MAX_SAMPLES}")
 else:
     print(f"Max training samples / 最大训练样本数: unlimited")
+print(f"Quantization / 量化加载: {'4-bit (NF4)' if USE_QUANT else 'BF16 (no quant)'}")
 print(f"Validation enabled / 启用验证: {DO_VALIDATE}")
 if DO_VALIDATE:
     print(f"Validation frequency / 验证频率: every {VAL_STEPS} steps / 每 {VAL_STEPS} 步")
@@ -140,27 +146,46 @@ tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
 
+# ========== Multi-GPU / DDP Support ==========
+# ========== 多卡 / DDP 支持 ==========
+# When using torchrun (DDP), each process must load the FULL model on its own GPU.
+# device_map="auto" would split the model across GPUs, conflicting with DDP.
+# 使用 torchrun (DDP) 时，每个进程必须在自己的 GPU 上加载完整模型。
+# device_map="auto" 会将模型分片到多张 GPU 上，与 DDP 冲突。
+LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
+print(f"🖥️ LOCAL_RANK: {LOCAL_RANK}")
+
 # ========== Load model =====
 
-# ========== 加载模型（4bit 量化）==========
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.float16,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    LOCAL_MODEL_DIR,
-    quantization_config=bnb_config,
-    device_map="auto",
-    trust_remote_code=True,
-    # torch_dtype=torch.bfloat16,
-    dtype=torch.bfloat16,
-)
-model.config.use_cache = False
-
-# 准备模型进行 k-bit 训练
-model = prepare_model_for_kbit_training(model)
+# ========== 加载模型（根据 USE_QUANT 决定是否 4bit 量化）==========
+if USE_QUANT:
+    print("📦 Loading model with 4-bit quantization / 以 4-bit 量化加载模型...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        LOCAL_MODEL_DIR,
+        quantization_config=bnb_config,
+        device_map={"":  LOCAL_RANK},  # 多卡DDP: 每个rank加载完整模型到自己的GPU / Multi-GPU DDP: each rank loads full model on its own GPU
+        trust_remote_code=True,
+        # torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
+    )
+    model.config.use_cache = False
+    # 准备模型进行 k-bit 训练
+    model = prepare_model_for_kbit_training(model)
+else:
+    print("📦 Loading model without quantization (BF16) / 以 BF16 无量化加载模型...")
+    model = AutoModelForCausalLM.from_pretrained(
+        LOCAL_MODEL_DIR,
+        device_map={"":  LOCAL_RANK},
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
+    )
+    model.config.use_cache = False
 
 
 # ========== Define TinyLoRA Layers ==========
@@ -168,8 +193,9 @@ model = prepare_model_for_kbit_training(model)
 # Note: TinyLoRA classes are now imported from utils.py
 # 注意：TinyLoRA 类现在从 utils.py 导入
 
-# 获取模型第一层的设备 (通常是 cuda:0)
-device = model.model.layers[0].self_attn.q_proj.weight.device
+# 获取当前 rank 对应的 GPU 设备
+# Get the GPU device for current rank
+device = torch.device(f"cuda:{LOCAL_RANK}")
 print(f"Model device/模型主设备: {device}")
 
 # 创建全局参数容器
@@ -295,7 +321,7 @@ def code_reward_func(prompts, completions, public_tests=None, private_tests=None
         
        
 
-# 【最终方案】绕过 Trainer 对纯量化模型的检查
+# 【最终方案】绕过 Trainer 对纯量化模型的检查（仅在量化模式下需要）
 # Trainer 的检查逻辑 (transformers/trainer.py):
 #   _is_quantized_and_base_model = model.is_quantized AND NOT model._hf_peft_config_loaded
 #   if _is_quantized_and_base_model and not isinstance(model, PeftModel): raise ValueError
@@ -303,9 +329,11 @@ def code_reward_func(prompts, completions, public_tests=None, private_tests=None
 # 我们的 TinyLoRA 是合法的 adapter（只训练 16 个参数），但不是标准 PeftModel。
 # 设置 _hf_peft_config_loaded = True 让第一道检查直接为 False，不会走到 isinstance 判断。
 # 这不影响实际计算——权重已经在内存中量化，TinyLoRA 层正确处理了反量化。
-model._hf_peft_config_loaded = True
-
-print("✅ Set _hf_peft_config_loaded=True / 已设置 _hf_peft_config_loaded=True：bypass Trainer quantization check")
+if USE_QUANT:
+    model._hf_peft_config_loaded = True
+    print("✅ Set _hf_peft_config_loaded=True / 已设置 _hf_peft_config_loaded=True：bypass Trainer quantization check")
+else:
+    print("ℹ️ Non-quantized mode, no need to bypass Trainer check / 非量化模式，无需绕过 Trainer 检查")
 
 def filter_dataset(dataset, config, max_samples, seed=42):
     """
@@ -495,6 +523,7 @@ class ValidationCallback(TrainerCallback):
                     "seed": self.seed,
                     "model_id": self.model_id,
                     "total_replaced_layers": self.total_replaced,
+                    "is_quantized": USE_QUANT,
                     "validation_score": current_score,
                     "step": state.global_step,
                 }
@@ -572,6 +601,7 @@ save_dict = {
     "seed": TINYLORA_SEED,                     # P matrix random seed (for reproducibility)
     "model_id": MS_MODEL_ID,                   # Base model ID / 基座模型 ID
     "total_replaced_layers": total_replaced,   # Number of replaced layers / 替换的层数
+    "is_quantized": USE_QUANT,                 # Whether model was loaded with 4-bit quantization / 模型是否以 4-bit 量化加载
 }
 torch.save(save_dict, f"{OUTPUT_DIR}/tiny_lora_v.pt")
 print(f"✅ Training complete! / 训练完成！Parameters saved to / 参数已保存至 {OUTPUT_DIR}/tiny_lora_v.pt")

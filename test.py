@@ -28,7 +28,7 @@ from utils import (
 from tqdm import tqdm
 
 
-def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_contests/code_contests_test.jsonl", baseline=False, test_seed=42):
+def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_contests/code_contests_test.jsonl", baseline=False, test_seed=42, use_quant=True):
     """
     Test a trained TinyLoRA model or baseline model on the test dataset
     在测试数据集上测试训练好的 TinyLoRA 模型或基座模型
@@ -39,6 +39,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         test_data_path: Path to test dataset / 测试数据集路径
         baseline: If True, test base model without TinyLoRA / 如果为 True，测试基座模型（不含 TinyLoRA）
         test_seed: Random seed for evaluation (sample selection & generation) / 评估用随机种子（样本选择和生成）
+        use_quant: Whether to load model with 4-bit quantization / 是否以 4-bit 量化加载模型
     
     Returns:
         dict: Test metrics / 测试指标
@@ -72,6 +73,12 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         print(f"   • model_id / 模型 ID: {model_id}")
         print(f"   • global_v shape / global_v 形状: {global_v.shape}\n")
         
+        # Check quantization state from checkpoint / 从检查点读取量化状态
+        trained_with_quant = checkpoint.get("is_quantized", False)
+        print(f"📌 模型微调时的量化状态: {'4-bit' if trained_with_quant else 'BF16/FP16'}")
+        if use_quant != trained_with_quant:
+            print("⚠️ 警告: 当前测试时的量化状态(--use_quant)与训练时不同，可能会有微小精度差异。")
+        
         # ========== Step 2: Note training seed (used only for P matrix reproduction) / 记录训练种子（仅用于 P 矩阵复现） ==========
         print(f"🎲 Checkpoint training seed / 检查点训练随机种子: {seed} (used for TinyLoRA P matrix reproduction / 用于 TinyLoRA P 矩阵复现)")
     
@@ -84,7 +91,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         model_id = 'qwen/Qwen2.5-Coder-3B-Instruct' if baseline else model_id
         model_path = model_id
     
-    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=True, for_inference=True)
+    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=use_quant, for_inference=True)
     
     # ========== Step 4: Conditionally inject TinyLoRA / 条件性注入 TinyLoRA ==========
     if not baseline:
@@ -306,8 +313,22 @@ if __name__ == "__main__":
         default=42,
         help="Random seed for evaluation (sample selection & generation) / 评估用随机种子（样本选择和生成），默认 42"
     )
+    parser.add_argument(
+        "--use_quant",
+        action="store_true",
+        default=True,
+        help="Load model with 4-bit quantization (default: True) / 以 4-bit 量化加载模型（默认：是）"
+    )
+    parser.add_argument(
+        "--no_quant",
+        action="store_true",
+        help="Disable 4-bit quantization, load in BF16 / 禁用 4-bit 量化，以 BF16 加载"
+    )
     
     args = parser.parse_args()
+    
+    # Resolve use_quant: --no_quant overrides --use_quant
+    use_quant = not args.no_quant
     
     mode_str = "Baseline Model" if args.baseline else "TinyLoRA Model"
     print(f"\n🎯 {mode_str} Testing / {mode_str} 测试")
@@ -315,7 +336,8 @@ if __name__ == "__main__":
         print(f"   Checkpoint / 检查点: {args.checkpoint_path}")
     print(f"   Samples / 样本数: {args.num_samples}")
     print(f"   Test Data / 测试数据: {args.test_data}")
-    print(f"   Test Seed / 评估随机种子: {args.test_seed}\n")
+    print(f"   Test Seed / 评估随机种子: {args.test_seed}")
+    print(f"   Quantization / 量化加载: {'4-bit' if use_quant else 'BF16 (no quant)'}\n")
     
     # Run testing / 运行测试
     results = test_model(
@@ -323,7 +345,8 @@ if __name__ == "__main__":
         num_samples=args.num_samples,
         test_data_path=args.test_data,
         baseline=args.baseline,
-        test_seed=args.test_seed
+        test_seed=args.test_seed,
+        use_quant=use_quant,
     )
     
     print(f"✅ Testing complete! / 测试完成！")

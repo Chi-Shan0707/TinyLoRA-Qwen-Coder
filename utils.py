@@ -60,9 +60,21 @@ class TinyLoRALinear(nn.Module):
         W = original_layer.weight.data
         device = W.device
         
+        # Detect if this is a quantized layer / 检测是否为量化层
+        self._is_quantized = hasattr(original_layer, 'quant_state')
+        
         # Handle 4-bit quantized weights / 处理 4-bit 量化权重
-        if hasattr(original_layer, 'quant_state'):
-            # Dequantize to FP32 on CPU for SVD / 反量化到 CPU FP32 进行 SVD
+        if self._is_quantized:
+            # 【关键修改 - 多卡兼容】保留原始 bnb Linear4bit 层，
+            # 让 bitsandbytes 自己处理前向传播（内部已兼容分布式内存布局）。
+            # 不再手动 dequantize + F.linear，避免多卡下 CUBLAS_STATUS_NOT_SUPPORTED。
+            # [KEY FIX - Multi-GPU] Keep original bnb Linear4bit layer and delegate
+            # base forward pass to bitsandbytes (internally handles distributed memory layout).
+            # No more manual dequantize + F.linear, avoiding CUBLAS_STATUS_NOT_SUPPORTED on multi-GPU.
+            self.base_layer = original_layer
+            
+            # Dequantize only for SVD computation (one-time, on CPU)
+            # 仅为 SVD 计算进行反量化（一次性，在 CPU 上）
             from bitsandbytes.functional import dequantize_4bit
             qs = original_layer.quant_state
             W_dequant = dequantize_4bit(
@@ -70,6 +82,12 @@ class TinyLoRALinear(nn.Module):
             ).to(torch.float32).cpu()
         else:
             W_dequant = W.to(torch.float32).cpu()
+            self.register_buffer('W_base', W.to(torch.bfloat16))
+            
+            if original_layer.bias is not None:
+                self.register_buffer('bias', original_layer.bias.data.to(torch.bfloat16))
+            else:
+                self.bias = None
         
         # Perform SVD (deterministic operation) / 执行 SVD（确定性运算）
         try:
@@ -97,61 +115,53 @@ class TinyLoRALinear(nn.Module):
         # 按论文建议除以 sqrt(rank) 以控制方差
         P = torch.randn(u_dim, self.rank, device=device, dtype=torch.bfloat16) / (self.rank ** 0.5)
         self.register_buffer('P', P)
+
+    def _compute_delta(self, compute_dtype):
+        """
+        Compute TinyLoRA delta weight matrix: ΔW = U @ diag(S * (v @ P)) @ Vh
+        计算 TinyLoRA 增量权重矩阵
         
-        # Store original weight and bias / 存储原始权重和偏置
-        if hasattr(original_layer, 'quant_state'):
-            # Keep quantized weight / 保留量化权重
-            self.register_buffer('W_base', W)
-            self.quant_state = original_layer.quant_state
-        else:
-            self.register_buffer('W_base', W.to(torch.bfloat16))
-        
-        if original_layer.bias is not None:
-            self.register_buffer('bias', original_layer.bias.data.to(torch.bfloat16))
-        else:
-            self.bias = None
+        All intermediate tensors are made .contiguous() to ensure cuBLAS compatibility
+        in distributed (multi-GPU / cluster) environments.
+        所有中间张量都调用 .contiguous() 以确保在分布式（多卡/集群）环境下与 cuBLAS 兼容。
+        """
+        v = self.global_params_ref.global_v.to(compute_dtype)
+        vP = v @ self.P.to(compute_dtype)
+        S_vP = self.S.to(compute_dtype) * vP
+        delta = (self.U.to(compute_dtype) @ torch.diag(S_vP) @ self.Vh.to(compute_dtype)).contiguous()
+        return delta
 
     def forward(self, x):
         """Forward pass with TinyLoRA delta / TinyLoRA 增量的前向传播"""
         orig_dtype = x.dtype
 
-        if hasattr(self, 'quant_state'):
-            # === Quantized path ===
-            # dequantize_4bit returns W_base in its own dtype (often float32).
-            # We use W_base.dtype as the single compute dtype for ALL matmuls
-            # to guarantee no dtype mismatch.
-            from bitsandbytes.functional import dequantize_4bit
-            W_base = dequantize_4bit(self.W_base, quant_state=self.quant_state, quant_type="nf4")
-            compute_dtype = W_base.dtype
+        if self._is_quantized:
+            # === Quantized path (multi-GPU safe) ===
+            # 【关键】让 bitsandbytes 的 Linear4bit 自己处理 base forward，
+            # 它内部已处理量化/反量化以及分布式内存兼容性，不会触发 cuBLAS 错误。
+            # [KEY] Let bitsandbytes Linear4bit handle base forward internally.
+            # It handles quantization/dequantization and distributed memory compatibility,
+            # avoiding CUBLAS_STATUS_NOT_SUPPORTED errors on multi-GPU.
+            out = self.base_layer(x)
+            compute_dtype = out.dtype
 
-            # Cast input to compute dtype
-            x_cast = x.to(compute_dtype)
-            out = torch.nn.functional.linear(x_cast, W_base, None)
-
-            # Compute TinyLoRA delta entirely in compute_dtype
-            v = self.global_params_ref.global_v.to(compute_dtype)
-            vP = v @ self.P.to(compute_dtype)
-            S_vP = self.S.to(compute_dtype) * vP
-            delta = self.U.to(compute_dtype) @ torch.diag(S_vP) @ self.Vh.to(compute_dtype)
+            # Compute TinyLoRA delta with contiguous tensors for distributed safety
+            # 用 contiguous 张量计算 TinyLoRA delta 以确保分布式安全
+            x_cast = x.to(compute_dtype).contiguous()
+            delta = self._compute_delta(compute_dtype)
 
             out = out + torch.nn.functional.linear(x_cast, delta, None)
-
-            if self.bias is not None:
-                out = out + self.bias.to(compute_dtype)
 
             return out.to(orig_dtype)
         else:
             # === Non-quantized path ===
             # Use W_base dtype (bfloat16) as compute dtype
             compute_dtype = self.W_base.dtype
-            x_cast = x.to(compute_dtype)
-            out = torch.nn.functional.linear(x_cast, self.W_base, None)
+            x_cast = x.to(compute_dtype).contiguous()
+            out = torch.nn.functional.linear(x_cast, self.W_base.contiguous(), None)
 
-            # Compute TinyLoRA delta in same dtype
-            v = self.global_params_ref.global_v.to(compute_dtype)
-            vP = v @ self.P.to(compute_dtype)
-            S_vP = self.S.to(compute_dtype) * vP
-            delta = self.U.to(compute_dtype) @ torch.diag(S_vP) @ self.Vh.to(compute_dtype)
+            # Compute TinyLoRA delta with contiguous tensors
+            delta = self._compute_delta(compute_dtype)
 
             out = out + torch.nn.functional.linear(x_cast, delta, None)
 
@@ -329,6 +339,11 @@ def get_model_and_tokenizer(model_path, use_4bit=True, for_inference=False):
     tokenizer.padding_side = "right"
     
     # Configure quantization / 配置量化
+    # Multi-GPU DDP: use LOCAL_RANK to place full model on each rank's GPU
+    # 多卡 DDP：使用 LOCAL_RANK 将完整模型放置在每个 rank 的 GPU 上
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    device_map = {"": local_rank}
+    
     if use_4bit:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -340,7 +355,7 @@ def get_model_and_tokenizer(model_path, use_4bit=True, for_inference=False):
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             quantization_config=bnb_config,
-            device_map="auto",
+            device_map=device_map,
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
         )
@@ -357,7 +372,7 @@ def get_model_and_tokenizer(model_path, use_4bit=True, for_inference=False):
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            device_map="auto",
+            device_map=device_map,
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
         )
