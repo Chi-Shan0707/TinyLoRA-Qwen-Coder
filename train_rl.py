@@ -171,8 +171,8 @@ if USE_QUANT:
         quantization_config=bnb_config,
         device_map={"":  LOCAL_RANK},  # 多卡DDP: 每个rank加载完整模型到自己的GPU / Multi-GPU DDP: each rank loads full model on its own GPU
         trust_remote_code=True,
-        # torch_dtype=torch.bfloat16,
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
+        # dtype=torch.bfloat16,
     )
     model.config.use_cache = False
     # 准备模型进行 k-bit 训练
