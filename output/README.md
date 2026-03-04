@@ -23,7 +23,7 @@
 - **包含字段**：
   - `global_v`：训练好的共享向量（torch.Tensor），形状例 `shape=torch.Size([32])`，即 u 维向量。
   - `u_value`：共享向量的维度（int），例如 32。
-  - `rank`：TinyLoRA 的秩（int），通常为 2。
+  - `rank`：TinyLoRA 的 SVD 秩（int），通过 `--rank` 参数配置，默认为 2。
   - `seed`：用于生成固定随机投影矩阵 P 的随机种子（int），例如 42。
   - `model_id`：基座模型的 Hugging Face ID（str），例如 `qwen/Qwen2.5-Coder-3B-Instruct`。
   - `total_replaced_layers`：被替换为 TinyLoRALinear 的 Linear 层总数（int），便于记录。
@@ -42,6 +42,7 @@ sd = torch.load("./output/luoguqwencoder-lora/tiny_lora_v.pt", map_location="cpu
 
 # 2) 提取元数据
 u = sd["u_value"]
+rank = sd["rank"]
 seed = sd["seed"]
 v = sd["global_v"]  # torch.Tensor
 model_id = sd.get("model_id", "qwen/Qwen2.5-Coder-3B-Instruct")
@@ -71,7 +72,7 @@ with torch.no_grad():
 
 # 5) 固定随机种子并注入 TinyLoRA（这会生成与训练时相同的 P 矩阵）
 torch.manual_seed(seed)
-apply_tiny_lora(model, global_params)
+apply_tiny_lora(model, global_params, rank=rank)
 
 # 6) 验证加载成功
 print(f"成功加载 TinyLoRA 模型")
@@ -101,7 +102,7 @@ This file is the trained LoRA adapter checkpoint containing the trained global s
 - **Fields**:
   - `global_v`: Trained shared vector (torch.Tensor), e.g., shape=[32] (u-dimensional vector).
   - `u_value`: Dimension of the shared vector (int), e.g., 32.
-  - `rank`: Rank of TinyLoRA (int), typically 2.
+  - `rank`: SVD rank of TinyLoRA (int), configurable via `--rank` argument, default 2.
   - `seed`: Random seed for generating fixed random projection matrices P (int), e.g., 42.
   - `model_id`: Hugging Face model ID of the base model (str), e.g., `qwen/Qwen2.5-Coder-3B-Instruct`.
   - `total_replaced_layers`: Total number of Linear layers replaced with TinyLoRALinear (int).
@@ -120,6 +121,7 @@ sd = torch.load("./output/luoguqwencoder-lora/tiny_lora_v.pt", map_location="cpu
 
 # 2) Extract metadata
 u = sd["u_value"]
+rank = sd["rank"]
 seed = sd["seed"]
 v = sd["global_v"]  # torch.Tensor
 model_id = sd.get("model_id", "qwen/Qwen2.5-Coder-3B-Instruct")
@@ -149,7 +151,7 @@ with torch.no_grad():
 
 # 5) Fix random seed and inject TinyLoRA (generates identical P matrices)
 torch.manual_seed(seed)
-apply_tiny_lora(model, global_params)
+apply_tiny_lora(model, global_params, rank=rank)
 
 # 6) Verify successful loading
 print(f"TinyLoRA model loaded successfully")

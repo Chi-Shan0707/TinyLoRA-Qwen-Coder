@@ -8,13 +8,14 @@
 [![License](https://img.shields.io/badge/License-CC_BY_4.0-green)](./LICENSE)
 [![Model](https://img.shields.io/badge/Base-Qwen2.5--Coder--3B--Instruct-purple)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct)
 [![Dataset](https://img.shields.io/badge/Data-CodeContests_(AlphaCode)-orange)](https://huggingface.co/datasets/deepmind/code_contests)
-![Version](https://img.shields.io/badge/Version-3.1-red)
+![Version](https://img.shields.io/badge/Version-3.1.5-red)
 
 </div>
 
 > We adapt TinyLoRA from math reasoning to competitive programming: inject tiny shared parameters into Qwen2.5-Coder-3B, train with GRPO, and reward real `g++` compile-and-run correctness.
 >
-> If this project is useful to you, please give it a ⭐ Star.
+> If this project is useful to you, please give it a ⭐ Star.<br>
+> 如果你觉得我的项目有意思的话，可否留下一个star呢(✿◠‿◠)?
 
 **Language / 语言**: [English](#english) | [中文](#中文)
 
@@ -25,7 +26,7 @@
 ### 🚀 Project Intro
 
 - **Task**: competitive C++ code generation with verifiable compile-and-run rewards.
-- **Core method**: TinyLoRA + GRPO on Qwen2.5-Coder-3B-Instruct.
+- **Core method**: TinyLoRA + GRPO on Qwen2.5-Coder-3B-Instruct(configurable).
 - **Default tiny setup**: `u=32` shared trainable scalars (configurable).
 - **Runtime modes**: 4-bit quantized (default) and BF16 (`--no_quant`).
 
@@ -60,11 +61,13 @@ python verify_pipeline.py
   --val_steps N: run validation every N steps (default: 100)<br>
   --val_samples N: number of validation samples (default: 10)<br>
   --no_quant: disable 4-bit quantization, load model in BF16<br>
+  --rank N: TinyLoRA SVD rank (default: 2)<br>
 
 ```bash
 python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
+python train_rl.py 32 2000 --rank 4
 ```
 
 5) Evaluate:
@@ -107,7 +110,7 @@ This section is organized by code-level **control blocks** (not flat knobs), mat
 - **Entry points**: `TinyLoRAGlobalParams`, `TinyLoRALinear`, `apply_tiny_lora`.
 - **Controllable scope**:
   - parameter count via CLI `u`
-  - frozen rank and stability/capacity tradeoff
+  - `rank`: SVD rank via CLI `--rank N` (default: 2), controls capacity/stability tradeoff
   - replacement scope (all proj vs attention-only)
   - projection seed via `TINYLORA_SEED`.
 
@@ -196,8 +199,16 @@ Interpretation:
 }
 ```
 
-```bibtex
-@article{li2022competition,
+```bibtex@misc{deepcoder2025,
+  title={DeepCoder: A Fully Open-Source 14B Coder at O3-mini Level},
+  author={Michael Luo and Sijun Tan and Roy Huang and Ameen Patel and Alpay Ariyak and Qingyang Wu and Xiaoxiang Shi and Rachel Xin and Colin Cai and Maurice Weber and Ce Zhang and Li Erran Li and Raluca Ada Popa and Ion Stoica},
+  howpublished={\url{https://pretty-radio-b75.notion.site/DeepCoder-A-Fully-Open-Source-14B-Coder-at-O3-mini-Level-1cf81902c14680b3bee5eb349a512a51}},
+  note={Notion Blog},
+  year={2025}
+}
+```
+
+```bibtex@article{li2022competition,
   title={Competition-Level Code Generation with AlphaCode},
   author={Li, Yujia and Choi, David and Chung, Junyoung and Kushman, Nate and
     Schrittwieser, Julian and Leblond, R{\'e}mi and Eccles, Tom and
@@ -219,7 +230,7 @@ Interpretation:
 ### 🚀 项目介绍
 
 - **任务**：面向竞赛题的 C++ 代码生成（可编译、可运行、可验证）。
-- **核心方法**：在 Qwen2.5-Coder-3B-Instruct 上做 TinyLoRA + GRPO。
+- **核心方法**：在 Qwen2.5-Coder-3B-Instruct （可替换）上做 TinyLoRA + GRPO。
 - **默认微调规模**：`u=32`（可调），支持 4-bit 与 BF16 两种流程。
 
 ### ⚡ 快速开始（安装 + 配置 + 启动）
@@ -253,11 +264,13 @@ python verify_pipeline.py
   --val_steps N: 每N步运行验证（默认：100）<br>
   --val_samples N: 验证样本数（默认：10）<br>
   --no_quant: 禁用4-bit量化，以BF16加载模型<br>
+  --rank N: TinyLoRA SVD 秩（默认：2）<br>
 
 ```bash
 python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
+python train_rl.py 32 2000 --rank 4
 ```
 
 5）评估：
@@ -297,7 +310,7 @@ python test.py --baseline --num_samples 50
 - **入口**：`TinyLoRAGlobalParams`、`TinyLoRALinear`、`apply_tiny_lora`
 - **可调范围**：
   - `u`（可训练参数总量）
-  - `rank`（容量/稳定性权衡）
+  - `rank`：SVD 秩，通过 `--rank N` 配置（默认 2），控制容量/稳定性权衡
   - 注入层范围（全量/attention-only）
   - `TINYLORA_SEED`（随机投影基）。
 
@@ -402,6 +415,16 @@ python train_rl.py 32 20 --do_validate --val_steps 10 --val_samples 10
   author={Morris, John X and Mireshghallah, Niloofar and Ibrahim, Mark and Mahloujifar, Saeed},
   journal={arXiv preprint arXiv:2602.04118},
   year={2026}
+}
+```
+
+```bibtex
+@misc{deepcoder2025,
+  title={DeepCoder: A Fully Open-Source 14B Coder at O3-mini Level},
+  author={Michael Luo and Sijun Tan and Roy Huang and Ameen Patel and Alpay Ariyak and Qingyang Wu and Xiaoxiang Shi and Rachel Xin and Colin Cai and Maurice Weber and Ce Zhang and Li Erran Li and Raluca Ada Popa and Ion Stoica},
+  howpublished={\url{https://pretty-radio-b75.notion.site/DeepCoder-A-Fully-Open-Source-14B-Coder-at-O3-mini-Level-1cf81902c14680b3bee5eb349a512a51}},
+  note={Notion Blog},
+  year={2025}
 }
 ```
 

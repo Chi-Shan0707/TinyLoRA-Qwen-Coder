@@ -171,13 +171,16 @@ class TinyLoRALinear(nn.Module):
             return out.to(orig_dtype)
 
 
-def apply_tiny_lora(model, global_params_ref):
+def apply_tiny_lora(model, global_params_ref, rank=2):
     """
     遍历模型，将所有目标 Linear 层替换为 TinyLoRALinear，
     并传入对 global_params 容器的引用，实现论文中的 Tiling (全参数共享)。
     
     Traverse the model and replace all target Linear layers with TinyLoRALinear,
     passing reference to global_params container to achieve Tiling (full parameter sharing) from the paper.
+    
+    Args:
+        rank: Rank for TinyLoRA SVD decomposition (default=2) / TinyLoRA SVD 分解的秩（默认为 2）
     """
     # Qwen/Llama target module names / Qwen/Llama 目标模块名称
     target_suffixes = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
@@ -189,13 +192,13 @@ def apply_tiny_lora(model, global_params_ref):
         # Check if this is a target layer / 检查是否为目标层
         if isinstance(child, nn.Linear) and any(name.endswith(suffix) for suffix in target_suffixes):
             # Replace with TinyLoRALinear / 替换为 TinyLoRALinear
-            tiny_lora_layer = TinyLoRALinear(child, rank=2, global_params_ref=global_params_ref)
+            tiny_lora_layer = TinyLoRALinear(child, rank=rank, global_params_ref=global_params_ref)
             setattr(model, name, tiny_lora_layer)
             replaced_count += 1
             print(f"  ✓ Replaced / 已替换: {name}")
         else:
             # Recursively process child modules / 递归处理子模块
-            replaced_count += apply_tiny_lora(child, global_params_ref)
+            replaced_count += apply_tiny_lora(child, global_params_ref, rank=rank)
             
     return replaced_count
 

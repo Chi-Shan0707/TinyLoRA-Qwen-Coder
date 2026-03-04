@@ -1,7 +1,16 @@
 # Changelog (English)
 
+## v3.1.5
+
+- Inspired by [DeepCoder](https://pretty-radio-b75.notion.site/DeepCoder-A-Fully-Open-Source-14B-Coder-at-O3-mini-Level-1cf81902c14680b3bee5eb349a512a51): adjusted two key training hyperparameters:
+  - Set KL divergence coefficient `beta=0` in `train_rl.py`, allowing the policy to explore freely without being anchored to the base model during training;
+  - Increased `clip_range` from the default `0.2` to `0.3`, allowing larger policy update steps when correct solutions are found.
+- Made TinyLoRA SVD rank `rank` a configurable CLI argument (`--rank N`, default: `2`), enabling fine-grained control over the capacity/stability tradeoff.
+- Updated README, usage guides, and output/README to document the `--rank` argument and added DeepCoder citation.
+
 ## v3.1
 
+- Fix issue 001. The fix ensures proper handling of dequantized weight tensors in a distributed data parallel (DDP) setting, eliminating the CUBLAS error. 
 - Added explicit configurable controls section in README, organized by **five system blocks**:
   - reward system
   - data selection

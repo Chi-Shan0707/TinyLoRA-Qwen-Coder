@@ -28,6 +28,7 @@ python verify_pipeline.py
 python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
+python train_rl.py 32 2000 --rank 4
 ```
 
 **训练命令行参数：**
@@ -37,6 +38,7 @@ python train_rl.py 32 2000 --no_quant
 - `--val_steps N`：每N步运行验证（默认：100）
 - `--val_samples N`：验证样本数（默认：10）
 - `--no_quant`：禁用4-bit量化，以BF16加载模型
+- `--rank N`：TinyLoRA SVD 秩（默认：2）
 
 5. 评估：
 

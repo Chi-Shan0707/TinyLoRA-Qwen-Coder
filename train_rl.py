@@ -29,12 +29,13 @@ from utils import (
 )
 
 print("✅ All libraries imported successfully! / 所有库导入成功！")
-print("📝 Usage example: python train_rl.py [u_value] [max_samples] [--do_validate] [--val_steps N] [--val_samples N]")
+print("📝 Usage example: python train_rl.py [u_value] [max_samples] [--do_validate] [--val_steps N] [--val_samples N] [--rank N]")
 print("   First arg: TinyLoRA u value (default: 16)")
 print("   Second arg: max training samples (default: 2000)")
 print("   --do_validate: Enable validation during training")
 print("   --val_steps: Run validation every N steps (default: 100)")
-print("   --val_samples: Number of validation samples (default: 10)\n")
+print("   --val_samples: Number of validation samples (default: 10)")
+print("   --rank: TinyLoRA SVD rank (default: 2)\n")
 
 # ========== argument parsing ==========
 # ========== 命令行参数：u 值、最大样本数 ==========
@@ -51,16 +52,22 @@ VAL_SAMPLES = 10  # Default / 默认值
 # --no_quant: disable quantization, load model in BF16
 USE_QUANT = '--no_quant' not in sys.argv
 
+# TinyLoRA rank / TinyLoRA SVD 秩（默认 2）
+TINYLORA_RANK = 2  # Default / 默认值
+
 for i, arg in enumerate(sys.argv):
     if arg == '--val_steps' and i + 1 < len(sys.argv):
         VAL_STEPS = int(sys.argv[i + 1])
     elif arg == '--val_samples' and i + 1 < len(sys.argv):
         VAL_SAMPLES = int(sys.argv[i + 1])
+    elif arg == '--rank' and i + 1 < len(sys.argv):
+        TINYLORA_RANK = int(sys.argv[i + 1])
 
 print(f"\n{'='*60}")
 print(f"📋 Training Configuration / 训练配置")
 print(f"{'='*60}")
 print(f"TinyLoRA u value / u值: {U_VALUE}")
+print(f"TinyLoRA rank / TinyLoRA 秩: {TINYLORA_RANK}")
 if MAX_SAMPLES is not None:
     print(f"Max training samples / 最大训练样本数: {MAX_SAMPLES}")
 else:
@@ -219,7 +226,7 @@ model.tiny_lora_params = global_params
 print(f"✅ Register global_params to model/已将 global_params 注册到模型")
 
 # 然后再进行层替换，传入 global_params 容器本身
-total_replaced = apply_tiny_lora(model, global_params)
+total_replaced = apply_tiny_lora(model, global_params, rank=TINYLORA_RANK)
 print(f"✅ Replace completed/替换完成！共替换了 {total_replaced} 个模块。")
 
 # ========== 关键步骤：冻结除 v 以外的所有参数 ==========
@@ -470,13 +477,14 @@ class ValidationCallback(TrainerCallback):
     Custom callback for validation during training / 训练期间验证的自定义回调
     Tracks best model and saves checkpoint / 跟踪最佳模型并保存检查点
     """
-    def __init__(self, val_dataset, val_steps, val_samples, output_dir, global_params, u_value, seed, model_id, total_replaced):
+    def __init__(self, val_dataset, val_steps, val_samples, output_dir, global_params, u_value, rank, seed, model_id, total_replaced):
         self.val_dataset = val_dataset
         self.val_steps = val_steps
         self.val_samples = val_samples
         self.output_dir = output_dir
         self.global_params = global_params
         self.u_value = u_value
+        self.rank = rank
         self.seed = seed
         self.model_id = model_id
         self.total_replaced = total_replaced
@@ -519,7 +527,7 @@ class ValidationCallback(TrainerCallback):
                 best_save_dict = {
                     "global_v": self.global_params.global_v.data.clone(),
                     "u_value": self.u_value,
-                    "rank": 2,
+                    "rank": self.rank,
                     "seed": self.seed,
                     "model_id": self.model_id,
                     "total_replaced_layers": self.total_replaced,
@@ -547,6 +555,7 @@ if DO_VALIDATE and val_dataset is not None:
         output_dir=OUTPUT_DIR,
         global_params=global_params,
         u_value=U_VALUE,
+        rank=TINYLORA_RANK,
         seed=TINYLORA_SEED,
         model_id=MS_MODEL_ID,
         total_replaced=total_replaced,
@@ -571,6 +580,13 @@ training_args = GRPOConfig(
     logging_steps=1,
     bf16=True,                      # Enable BF16 acceleration / 开启 BF16 加速
     save_strategy="no",             # Disable auto checkpoint (TinyLoRA is non-standard PEFT)
+
+
+    # 👇======================================================👇 
+    # updated in v3.1.1
+    beta=0.0,                       # deprecate KL penalty： empower the model to expolore more without constraints/去除 KL 散度惩罚：允许模型完全放飞自我去探索，不再受限于初始基座模型
+    clip_range=0.3,                 # expand Clip range / 扩大 Clip 范围:默认是 0.2。调大后允许模型在遇到正确解法时，以更大的步子更新策略
+    
 )
 
 # Initialize trainer / 初始化训练器
@@ -597,7 +613,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 save_dict = {
     "global_v": global_params.global_v.data,  # Trained v vector / 训练好的 v 向量
     "u_value": U_VALUE,                        # Dimension of v / v 的维度
-    "rank": 2,                                 # TinyLoRA rank
+    "rank": TINYLORA_RANK,                     # TinyLoRA rank / TinyLoRA 秩
     "seed": TINYLORA_SEED,                     # P matrix random seed (for reproducibility)
     "model_id": MS_MODEL_ID,                   # Base model ID / 基座模型 ID
     "total_replaced_layers": total_replaced,   # Number of replaced layers / 替换的层数
@@ -605,4 +621,4 @@ save_dict = {
 }
 torch.save(save_dict, f"{OUTPUT_DIR}/tiny_lora_v.pt")
 print(f"✅ Training complete! / 训练完成！Parameters saved to / 参数已保存至 {OUTPUT_DIR}/tiny_lora_v.pt")
-print(f"📊 Save contents / 保存内容: global_v (shape={global_params.global_v.shape}), u={U_VALUE}, rank=2, seed={TINYLORA_SEED}")
+print(f"📊 Save contents / 保存内容: global_v (shape={global_params.global_v.shape}), u={U_VALUE}, rank={TINYLORA_RANK}, seed={TINYLORA_SEED}")

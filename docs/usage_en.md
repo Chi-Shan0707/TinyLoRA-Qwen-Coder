@@ -28,6 +28,7 @@ python verify_pipeline.py
 python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
+python train_rl.py 32 2000 --rank 4
 ```
 
 **Command-line arguments for training:**
@@ -37,6 +38,7 @@ python train_rl.py 32 2000 --no_quant
 - `--val_steps N`: run validation every N steps (default: 100)
 - `--val_samples N`: number of validation samples (default: 10)
 - `--no_quant`: disable 4-bit quantization, load model in BF16
+- `--rank N`: TinyLoRA SVD rank (default: 2)
 
 5. Evaluate:
 
