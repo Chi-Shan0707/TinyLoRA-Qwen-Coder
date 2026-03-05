@@ -279,12 +279,15 @@ def compile_and_run(code, test_cases, timeout=2):
                 continue
         
         # Calculate reward / 计算奖励
+        # Base: 0.5 for compile success, then 0.5 * (passed / total) for test cases
+        # 基础：编译成功后 0.5 分，然后每个测试用例通过加 0.5 * (k/N)
         if passed == 0:
             return 0.5  # Compiled but no tests passed / 编译成功但未通过测试
         elif passed == total:
             return 1.0  # All tests passed / 全部通过
         else:
-            return 0.5  # Partial pass / 部分通过
+            # Partial pass: 0.5 + 0.5 * (passed / total)
+            return 0.5 + 0.5 * (passed / total)
 
 
 def convert_hf_tests_to_list(hf_tests):
