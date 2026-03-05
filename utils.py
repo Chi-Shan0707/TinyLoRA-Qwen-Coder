@@ -360,7 +360,7 @@ def get_model_and_tokenizer(model_path, use_4bit=True, for_inference=False):
             quantization_config=bnb_config,
             device_map=device_map,
             trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
         
         if for_inference:
@@ -377,7 +377,7 @@ def get_model_and_tokenizer(model_path, use_4bit=True, for_inference=False):
             model_path,
             device_map=device_map,
             trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
         )
     
     print(f"✅ Model and tokenizer loaded successfully / 模型和分词器加载成功\n")
@@ -420,43 +420,34 @@ def extract_code_from_response(response):
 def apply_chat_template(example, tokenizer):
     """
     Build prompt from problem description and public test cases.
-    For deepmind/code_contests dataset structure.
-    
+    Supports both:
+    - deepmind/code_contests dataset structure (public_tests, private_tests, generated_tests)
+    - DeepCoder dataset structure (input_output)
+
     从问题描述和公开测试用例构建提示。
-    适用于 deepmind/code_contests 数据集结构。
-    
+    支持两种数据集格式。
+
     Args:
         example: Dataset example / 数据集样本
         tokenizer: Tokenizer for applying chat template / 用于应用聊天模板的分词器
-    
+
     Returns:
         dict: Example with 'prompt' field added / 添加了 'prompt' 字段的样本
     """
     # Extract problem description / 提取问题描述
+    # Truncate long descriptions to save memory
     description = example.get('description', '')
-    
-    # Build public test cases section / 构建公开测试用例部分
-    public_tests_section = ""
-    public_tests = example.get('public_tests', {})
-    
-    if isinstance(public_tests, dict) and 'input' in public_tests and 'output' in public_tests:
-        inputs = public_tests['input'] if isinstance(public_tests['input'], list) else [public_tests['input']]
-        outputs = public_tests['output'] if isinstance(public_tests['output'], list) else [public_tests['output']]
-        
-        if inputs and outputs:
-            public_tests_section = "\n【Cases】\n"
-            for i, (inp, out) in enumerate(zip(inputs, outputs), 1):
-                public_tests_section += f"Example {i}:\nInput:\n{inp}\nOutput:\n{out}\n"
-    
+    if len(description) > 8000:  # Limit description length
+        description = description[:8000] + "...(truncated)"
+
     # Combine into final prompt / 组合成最终提示
+    # 注意：不拼接输入输出样例，避免某些样本的测试用例巨大导致 prompt 过长
     final_prompt = f"""You will be given a programming contest problem. Please reason step by step and provide a complete C++ implementation.
 Output the solution in a code block. Do not include debugging info or extra output. Limit reasoning to 128 tokens.
 
 
 【Problem Description】
 {description}
-
-{public_tests_section}
 
 Please provide your C++ solution:"""
     

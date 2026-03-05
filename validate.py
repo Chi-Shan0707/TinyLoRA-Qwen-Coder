@@ -147,18 +147,76 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
 if __name__ == "__main__":
     """
     Standalone validation script / 独立验证脚本
-    Usage / 用法: python validate.py [num_samples] [--no_quant]
+
+    Usage / 用法:
+        python validate.py
+        python validate.py --num_samples 50
+        python validate.py --checkpoint ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
+        python validate.py --no_quant
+
+    Example / 示例:
+        # Default: 10 samples, 4-bit quantization
+        python validate.py
+
+        # Test with 50 samples, no quantization
+        python validate.py --num_samples 50 --no_quant
+
+        # Use specific checkpoint
+        python validate.py --checkpoint ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
     """
-    import sys
+    import argparse
     from datasets import load_dataset
     from utils import get_model_and_tokenizer, TinyLoRAGlobalParams, apply_tiny_lora
-    
+
+    parser = argparse.ArgumentParser(
+        description="Standalone validation script for TinyLoRA model / TinyLoRA 模型的独立验证脚本",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples / 示例:
+  python validate.py                              # Default: 10 samples, 4-bit
+  python validate.py --num_samples 50            # Test with 50 samples
+  python validate.py --no_quant                   # Load model in BF16
+  python validate.py --checkpoint custom.pt --num_samples 100
+        """
+    )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=10,
+        help="Number of samples to validate / 验证样本数 (default: 10)"
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default="./output/luoguqwencoder-lora/tiny_lora_v.pt",
+        help="Path to checkpoint .pt file / 检查点 .pt 文件路径 (default: ./output/luoguqwencoder-lora/tiny_lora_v.pt)"
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="./models/Qwen2.5-Coder-3B-Instruct",
+        help="Path to model or HuggingFace model ID / 模型路径或 HuggingFace 模型 ID (default: ./models/Qwen2.5-Coder-3B-Instruct)"
+    )
+    parser.add_argument(
+        "--val_data",
+        type=str,
+        default="./local_code_contests/code_contests_valid.jsonl",
+        help="Path to validation dataset / 验证数据集路径 (default: ./local_code_contests/code_contests_valid.jsonl)"
+    )
+    parser.add_argument(
+        "--no_quant",
+        action="store_true",
+        help="Disable 4-bit quantization, load model in BF16 / 禁用 4-bit 量化，以 BF16 加载模型"
+    )
+
+    args = parser.parse_args()
+
     # Configuration / 配置
-    MODEL_PATH = "./models/Qwen2.5-Coder-3B-Instruct"
-    CHECKPOINT_PATH = "./output/luoguqwencoder-lora/tiny_lora_v.pt"
-    VAL_DATA_PATH = "./local_code_contests/code_contests_valid.jsonl"
-    NUM_SAMPLES = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 10
-    USE_QUANT = '--no_quant' not in sys.argv
+    MODEL_PATH = args.model
+    CHECKPOINT_PATH = args.checkpoint
+    VAL_DATA_PATH = args.val_data
+    NUM_SAMPLES = args.num_samples
+    USE_QUANT = not args.no_quant
     
     print(f"\n🚀 Standalone Validation Mode / 独立验证模式")
     print(f"📦 Model Path / 模型路径: {MODEL_PATH}")

@@ -1,5 +1,34 @@
 # 更新日志（中文）
 
+## v3.5
+
+- **移除 prompt 中的测试用例样例**：停止将 `input_output`/`public_tests` 拼接到聊天模板中：
+  - 某些样本携带巨大的测试用例（200K+ 字符），导致 prompt 膨胀，训练时 OOM
+  - 现在 prompt 只包含问题描述，不含样例
+  - 此更改显著降低了训练时的内存占用
+- **训练时限制测试用例数量**：
+  - 在 `code_reward_func` 中限制为前 5 个测试用例，避免过多 subprocess fork（每次 fork 会创建大模型进程；过多 fork → OOM killer）
+- **DeepCoder 数据加载优化**：
+  - 加载时将 `input_output` 裁剪为前 5 个测试用例
+  - 某些样本携带巨大测试用例导致多 GB 内存膨胀 → OOM
+
+- **Clip High（来自 DeepCoder/DAPO 论文）**：在 GRPO 损失中实现非对称截断：
+  - 添加 `epsilon=0.2`（下界：1 - 0.2 = 0.8）
+  - 添加 `epsilon_high=0.5`（上界：1 + 0.5 = 1.5）
+  - 与对称截断 [1-ε, 1+ε] 不同，Clip High 仅提高上界
+  - 这鼓励更多探索，防止在找到正确解法时过早收敛
+  - 详见 [DeepCoder 论文](https://pretty-radio-b75.notion.site/DeepCoder-A-Fully-Open-Source-14B-Coder-at-O3-mini-Level-1cf81902c14680b3bee5eb349a512a51)
+- **DeepCoder 数据集支持**：新增对 [DeepCoder-Preview-Dataset](https://huggingface.co/datasets/agentica-org/DeepCoder-Preview-Dataset) 的支持：
+  - 新增 `download_DeepCoder-Preview-Dataset.py` 脚本（parquet格式）用于下载和预处理 DeepCoder 数据集
+  - 支持4个配置：codeforces, lcbv5, primeintellect, taco
+  - 新增 `--dataset` CLI 参数，可选择 'code_contests'（默认）或 'deepcoder'
+  - 修改奖励函数以支持两种数据集格式
+  - DeepCoder 数据集要求每个问题至少有 5 个测试用例（下载时已过滤）
+- 将 `download_dataset.py` 重命名为 `download_code_contests.py` 以明确区分
+- 更新 GRPOConfig 使用新的 `epsilon` 和 `epsilon_high` 参数（替换已弃用的 `clip_range`）
+- 更新 README，添加 DeepCoder 数据集徽章和使用说明
+- 在 README 中添加 DeepCoder 数据集引用
+
 ## v3.1.5
 
 - 受 [DeepCoder](https://pretty-radio-b75.notion.site/DeepCoder-A-Fully-Open-Source-14B-Coder-at-O3-mini-Level-1cf81902c14680b3bee5eb349a512a51) 启发，调整了两项关键训练超参数：

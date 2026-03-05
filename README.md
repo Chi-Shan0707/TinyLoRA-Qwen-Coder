@@ -7,10 +7,19 @@
 [![Paper](https://img.shields.io/badge/Paper-Learning_to_Reason_in_13_Parameters-blue)](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 [![License](https://img.shields.io/badge/License-CC_BY_4.0-green)](./LICENSE)
 [![Model](https://img.shields.io/badge/Base-Qwen2.5--Coder--3B--Instruct-purple)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct)
-[![Dataset](https://img.shields.io/badge/Data-CodeContests_(AlphaCode)-orange)](https://huggingface.co/datasets/deepmind/code_contests)
-![Version](https://img.shields.io/badge/Version-3.1.5-red)
+[![Dataset](https://img.shields.io/badge/Data-CodeContests-orange)](https://huggingface.co/datasets/deepmind/code_contests)
+[![Dataset](https://img.shields.io/badge/Data-DeepCoder-blue)](https://huggingface.co/datasets/agentica-org/DeepCoder-Preview-Dataset)
+![Version](https://img.shields.io/badge/Version-3.5-red)
+
+<br>
+
+| 🔢 Parameters | 🧠 Base Model | 🎯 Task | ⚡ Method | 💾 VRAM |
+| :---: | :---: | :---: | :---: | :---: |
+| **u=32 (adjustable)** | Qwen2.5-Coder-3B(adjustable) | C++ Code Gen | GRPO (RL) | 16GB+ |
 
 </div>
+
+> **v3.5** — Asymmetric GRPO clipping (Clip High, ε=0.2/ε_high=0.5) · DeepCoder dataset support (`--dataset deepcoder`) · configurable SVD rank (`--rank N`) · KL-free training (`beta=0`) · 4-bit / BF16 dual path
 
 > We adapt TinyLoRA from math reasoning to competitive programming: inject tiny shared parameters into Qwen2.5-Coder-3B, train with GRPO, and reward real `g++` compile-and-run correctness.
 >
@@ -29,6 +38,7 @@
 - **Core method**: TinyLoRA + GRPO on Qwen2.5-Coder-3B-Instruct(configurable).
 - **Default tiny setup**: `u=32` shared trainable scalars (configurable).
 - **Runtime modes**: 4-bit quantized (default) and BF16 (`--no_quant`).
+- **CLI Help**: All scripts support `--help` for detailed usage information.
 
 ### ⚡ Quick Start (Install + Configure + Run)
 
@@ -43,7 +53,11 @@ pip install -r requirements.txt
 2) Download and preprocess dataset:
 
 ```bash
-python download_dataset.py
+# Option A: CodeContests dataset (default)
+python download_code_contests.py
+
+# Option B: DeepCoder dataset (from agentica-org/DeepCoder-Preview-Dataset, parquet format)
+python download_DeepCoder-Preview-Dataset.py
 ```
 
 3) Optional end-to-end sanity check:
@@ -54,7 +68,7 @@ python verify_pipeline.py
 
 4) Start RL training:
 
-> args: 
+> args:
   u_value: the first argument value (TinyLoRA parameter count, default: 16)<br>
   max_samples: the second argument value (max training samples, default: 2000)<br>
   --do_validate: enable validation during training<br>
@@ -62,12 +76,17 @@ python verify_pipeline.py
   --val_samples N: number of validation samples (default: 10)<br>
   --no_quant: disable 4-bit quantization, load model in BF16<br>
   --rank N: TinyLoRA SVD rank (default: 2)<br>
+  --dataset NAME: choose dataset - 'code_contests' (default) or 'deepcoder'<br>
 
 ```bash
+# Using CodeContests dataset (default)
 python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
 python train_rl.py 32 2000 --rank 4
+
+# Using DeepCoder dataset
+python train_rl.py 32 2000 --dataset deepcoder
 ```
 
 5) Evaluate:
