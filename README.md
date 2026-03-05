@@ -7,10 +7,19 @@
 [![Paper](https://img.shields.io/badge/Paper-Learning_to_Reason_in_13_Parameters-blue)](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 [![License](https://img.shields.io/badge/License-CC_BY_4.0-green)](./LICENSE)
 [![Model](https://img.shields.io/badge/Base-Qwen2.5--Coder--3B--Instruct-purple)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct)
-[![Dataset](https://img.shields.io/badge/Data-CodeContests_(AlphaCode)-orange)](https://huggingface.co/datasets/deepmind/code_contests)
-![Version](https://img.shields.io/badge/Version-3.1.5-red)
+[![Dataset](https://img.shields.io/badge/Data-CodeContests-orange)](https://huggingface.co/datasets/deepmind/code_contests)
+[![Dataset](https://img.shields.io/badge/Data-DeepCoder-blue)](https://huggingface.co/datasets/agentica-org/DeepCoder-Preview-Dataset)
+![Version](https://img.shields.io/badge/Version-3.5-red)
+
+<br>
+
+| 🔢 Parameters | 🧠 Base Model | 🎯 Task | ⚡ Method | 💾 VRAM |
+| :---: | :---: | :---: | :---: | :---: |
+| **u=32 (adjustable)** | Qwen2.5-Coder-3B(adjustable) | C++ Code Gen | GRPO (RL) | 16GB+ |
 
 </div>
+
+> **v3.5** — Asymmetric GRPO clipping (Clip High, ε=0.2/ε_high=0.5) · DeepCoder dataset support (`--dataset deepcoder`) · configurable SVD rank (`--rank N`) · KL-free training (`beta=0`) · 4-bit / BF16 dual path
 
 > We adapt TinyLoRA from math reasoning to competitive programming: inject tiny shared parameters into Qwen2.5-Coder-3B, train with GRPO, and reward real `g++` compile-and-run correctness.
 >
@@ -29,6 +38,52 @@
 - **Core method**: TinyLoRA + GRPO on Qwen2.5-Coder-3B-Instruct(configurable).
 - **Default tiny setup**: `u=32` shared trainable scalars (configurable).
 - **Runtime modes**: 4-bit quantized (default) and BF16 (`--no_quant`).
+- **CLI Help**: All scripts support `--help` for detailed usage information.
+
+### 📖 Training Method Overview (Based on Paper)
+
+This section describes how TinyLoRA works, as introduced in the paper ["Learning to Reason in 13 Parameters"](https://arxiv.org/abs/2602.04118).<br>
+Technical Guide (EN default): [TECHNICAL_GUIDE.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/TECHNICAL_GUIDE.md)
+
+#### 1. Shared Weight Layer with Random Projection
+
+TinyLoRA freezes the pretrained model's weights and injects a **tiny trainable parameter layer** using **Low-Rank Adaptation (LoRA)** with a key twist — **parameter sharing**:
+
+- **Core Equation**: $W' = W + U\Sigma\left(\sum_{i=1}^{u} v_i P_i\right)V^\top$
+  - $W$: Frozen pretrained weight matrix
+  - $U, \Sigma, V$: Frozen SVD skeleton (obtained via SVD decomposition of $W$)
+  - $P_i$: Fixed random projection matrices (generated once and frozen)
+  - $v_i$: **Trainable tiny scalar vector** (the only parameters updated during training)
+
+- **Parameter Sharing**: Instead of training separate low-rank matrices for each layer, all layers share the **same random projection bases ($P_i$)** and only differ in their **trainable scalar vector ($v$)**. This dramatically reduces the number of trainable parameters from $O(d_{model} \times rank \times num\_layers)$ to just $O(u)$.
+
+- **How it works**: For each layer with weight $W$, we:
+  1. Compute SVD: $W = U\Sigma V^\top$
+  2. Generate random projection matrix $P$ (fixed throughout training)
+  3. Compute delta: $\Delta W = U\Sigma (v \cdot P) V^\top$
+  4. Final weight: $W' = W + \Delta W$
+
+#### 2. Fine-tuning the Vector v with GRPO
+
+Only the vector $v$ (dimension $u$, typically 16-32) is trainable
+- All other parameters (base model weights $W$, SVD components $U,\Sigma,V$, projection matrices $P$) remain frozen
+- This is extremely parameter-efficient: training just 16-32 scalars can influence the entire model behavior
+
+#### 3. Reward Calculation
+
+The reward function evaluates code quality through actual compilation and execution:
+
+| Condition | Score |
+| :--- | :---: |
+| Compile failed | `0.0` |
+| Compile success (0 tests passed) | `0.5` |
+| Partial pass (k/N tests passed) | `0.5 + 0.5 × (k/N)` |
+| All tests passed | `1.0` |
+
+- **Compilation**: Uses `g++ -O2 -std=c++17`
+- **Execution**: Runs against test cases with 2-second timeout
+- **Output comparison**: Exact match after stripping whitespace
+- **Difficulty scaling**: Different sources/difficulties may have reward multipliers (e.g., Codeforces B-level × 1.1)
 
 ### ⚡ Quick Start (Install + Configure + Run)
 
@@ -43,7 +98,11 @@ pip install -r requirements.txt
 2) Download and preprocess dataset:
 
 ```bash
-python download_dataset.py
+# Option A: CodeContests dataset (default)
+python download_code_contests.py
+
+# Option B: DeepCoder dataset (from agentica-org/DeepCoder-Preview-Dataset, parquet format)
+python download_DeepCoder-Preview-Dataset.py
 ```
 
 3) Optional end-to-end sanity check:
@@ -54,7 +113,7 @@ python verify_pipeline.py
 
 4) Start RL training:
 
-> args: 
+> args:
   u_value: the first argument value (TinyLoRA parameter count, default: 16)<br>
   max_samples: the second argument value (max training samples, default: 2000)<br>
   --do_validate: enable validation during training<br>
@@ -62,12 +121,17 @@ python verify_pipeline.py
   --val_samples N: number of validation samples (default: 10)<br>
   --no_quant: disable 4-bit quantization, load model in BF16<br>
   --rank N: TinyLoRA SVD rank (default: 2)<br>
+  --dataset NAME: choose dataset - 'code_contests' (default) or 'deepcoder'<br>
 
 ```bash
+# Using CodeContests dataset (default)
 python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
 python train_rl.py 32 2000 --rank 4
+
+# Using DeepCoder dataset
+python train_rl.py 32 2000 --dataset deepcoder
 ```
 
 5) Evaluate:
@@ -136,6 +200,7 @@ This section is organized by code-level **control blocks** (not flat knobs), mat
 
 - Detailed Usage Guide (includes data pipeline + validation/testing): [docs/usage_en.md](./docs/usage_en.md)
 - Changelog (detailed): [docs/changelog_en.md](./docs/changelog_en.md)
+- Known Pitfalls & Notes: [docs/warning_en.md](./docs/warning_en.md)
 - FAQ: [docs/faq_en.md](./docs/faq_en.md)
 - Paper Hub: [paper-Learning to Reason in 13 Parameters/README.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 - Technical Guide (EN default): [TECHNICAL_GUIDE.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/TECHNICAL_GUIDE.md)
@@ -232,6 +297,52 @@ Interpretation:
 - **任务**：面向竞赛题的 C++ 代码生成（可编译、可运行、可验证）。
 - **核心方法**：在 Qwen2.5-Coder-3B-Instruct （可替换）上做 TinyLoRA + GRPO。
 - **默认微调规模**：`u=32`（可调），支持 4-bit 与 BF16 两种流程。
+
+
+### 📖 训练方法概述（基于论文）
+
+本节介绍 TinyLoRA 的工作原理，源自论文 ["Learning to Reason in 13 Parameters"](https://arxiv.org/abs/2602.04118)。<br>
+技术文档（中文）： [TECHNICAL_GUIDE_CN.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/TECHNICAL_GUIDE_CN.md)
+
+#### 1. 共享权重层与随机投影
+
+TinyLoRA 冻结预训练模型的权重，并注入一个**极小的可训练参数层**，使用**低秩适配（LoRA）**的关键技巧 —— **参数共享**：
+
+- **核心公式**: $W' = W + U\Sigma\left(\sum_{i=1}^{u} v_i P_i\right)V^\top$
+  - $W$: 冻结的预训练权重矩阵
+  - $U, \Sigma, V$: 冻结的 SVD 骨架（通过 $W$ 的 SVD 分解获得）
+  - $P_i$: 固定随机投影矩阵（生成一次后冻结）
+  - $v_i$: **可训练极小标量向量**（训练期间唯一更新的参数）
+
+- **参数共享**: 不为每个层训练独立的低秩矩阵，所有层共享**相同的随机投影基 ($P_i$)**，仅通过**可训练标量向量 ($v$)** 来区分。这将可训练参数数量从 $O(d_{model} \times rank \times num\_layers)$ 大幅减少到仅 $O(u)$。
+
+- **工作原理**: 对于每个有权重 $W$ 的层：
+  1. 计算 SVD: $W = U\Sigma V^\top$
+  2. 生成随机投影矩阵 $P$（训练期间固定）
+  3. 计算增量: $\Delta W = U\Sigma (v \cdot P) V^\top$
+  4. 最终权重: $W' = W + \Delta W$
+
+#### 2. 使用 GRPO 微调向量 v
+
+- GRPO 训练期间，仅向量 $v$（维度 $u$，通常 16-32）可训练
+- 其他所有参数（基础模型权重 $W$、SVD 分量 $U,\Sigma,V$、投影矩阵 $P$）保持冻结
+- 这极其参数高效：仅训练 16-32 个标量就能影响整个模型行为
+
+#### 3. 奖励计算
+
+奖励函数通过实际编译和执行来评估代码质量：
+
+| 条件 | 分数 |
+| :--- | :---: |
+| 编译失败 | `0.0` |
+| 编译成功（0 个测试通过） | `0.5` |
+| 部分通过（k/N 个测试通过） | `0.5 + 0.5 × (k/N)` |
+| 全部测试通过 | `1.0` |
+
+- **编译**: 使用 `g++ -O2 -std=c++17`
+- **执行**: 对测试用例运行，超时 2 秒
+- **输出比较**: 去除空白后精确匹配
+- **难度缩放**: 不同来源/难度可能有奖励倍数（例如 Codeforces B 级 × 1.1）
 
 ### ⚡ 快速开始（安装 + 配置 + 启动）
 
@@ -331,6 +442,7 @@ python test.py --baseline --num_samples 50
 
 - 详细使用指南（含数据流水线 + 验证测试细节）： [docs/usage_zh.md](./docs/usage_zh.md)
 - 更新日志（详细版）： [docs/changelog_zn.md](./docs/changelog_zn.md)
+- 已知坑点与注意事项： [docs/warning_zn.md](./docs/warning_zn.md)
 - 常见问题： [docs/faq_zh.md](./docs/faq_zh.md)
 - 论文入口： [paper-Learning to Reason in 13 Parameters/README.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 - 技术文档（英文默认）： [TECHNICAL_GUIDE.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/TECHNICAL_GUIDE.md)

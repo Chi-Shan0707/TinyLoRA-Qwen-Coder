@@ -29,39 +29,93 @@ from utils import (
 )
 
 print("✅ All libraries imported successfully! / 所有库导入成功！")
-print("📝 Usage example: python train_rl.py [u_value] [max_samples] [--do_validate] [--val_steps N] [--val_samples N] [--rank N]")
-print("   First arg: TinyLoRA u value (default: 16)")
-print("   Second arg: max training samples (default: 2000)")
-print("   --do_validate: Enable validation during training")
-print("   --val_steps: Run validation every N steps (default: 100)")
-print("   --val_samples: Number of validation samples (default: 10)")
-print("   --rank: TinyLoRA SVD rank (default: 2)\n")
 
-# ========== argument parsing ==========
-# ========== 命令行参数：u 值、最大样本数 ==========
-U_VALUE = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 16
-MAX_SAMPLES = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 2000
+# ========== argument parsing with argparse ==========
+import argparse
 
-# Validation arguments / 验证参数
-DO_VALIDATE = '--do_validate' in sys.argv
-VAL_STEPS = 100  # Default / 默认值
-VAL_SAMPLES = 10  # Default / 默认值
+parser = argparse.ArgumentParser(
+    description="TinyLoRA-RL Training Script / TinyLoRA-RL 训练脚本",
+    formatter_class=argparse.RawDescriptionHelpFormatter,
+    epilog="""
+Examples / 示例:
+  # Basic training
+  python train_rl.py 32 2000
 
-# Quantization argument / 量化参数
-# --use_quant: enable 4-bit quantized model loading (default: True for backward compatibility)
-# --no_quant: disable quantization, load model in BF16
-USE_QUANT = '--no_quant' not in sys.argv
+  # Training with validation
+  python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 
-# TinyLoRA rank / TinyLoRA SVD 秩（默认 2）
-TINYLORA_RANK = 2  # Default / 默认值
+  # Training without quantization
+  python train_rl.py 32 2000 --no_quant
 
-for i, arg in enumerate(sys.argv):
-    if arg == '--val_steps' and i + 1 < len(sys.argv):
-        VAL_STEPS = int(sys.argv[i + 1])
-    elif arg == '--val_samples' and i + 1 < len(sys.argv):
-        VAL_SAMPLES = int(sys.argv[i + 1])
-    elif arg == '--rank' and i + 1 < len(sys.argv):
-        TINYLORA_RANK = int(sys.argv[i + 1])
+  # Training with custom rank
+  python train_rl.py 32 2000 --rank 4
+
+  # Training with DeepCoder dataset
+  python train_rl.py 32 2000 --dataset deepcoder
+    """
+)
+
+parser.add_argument(
+    "u_value",
+    nargs="?",
+    type=int,
+    default=16,
+    help="TinyLoRA parameter count / TinyLoRA 参数数量 (default: 16)"
+)
+parser.add_argument(
+    "max_samples",
+    nargs="?",
+    type=int,
+    default=2000,
+    help="Maximum training samples / 最大训练样本数 (default: 2000)"
+)
+parser.add_argument(
+    "--do_validate",
+    action="store_true",
+    help="Enable validation during training / 开启训练中验证"
+)
+parser.add_argument(
+    "--val_steps",
+    type=int,
+    default=100,
+    help="Run validation every N steps / 每N步运行验证 (default: 100)"
+)
+parser.add_argument(
+    "--val_samples",
+    type=int,
+    default=10,
+    help="Number of validation samples / 验证样本数 (default: 10)"
+)
+parser.add_argument(
+    "--rank",
+    type=int,
+    default=2,
+    help="TinyLoRA SVD rank / TinyLoRA SVD 秩 (default: 2)"
+)
+parser.add_argument(
+    "--dataset",
+    type=str,
+    default="code_contests",
+    choices=["code_contests", "deepcoder"],
+    help="Dataset to use / 要使用的数据集: 'code_contests' or 'deepcoder' (default: code_contests)"
+)
+parser.add_argument(
+    "--no_quant",
+    action="store_true",
+    help="Disable 4-bit quantization, load model in BF16 / 禁用4-bit量化，以BF16加载模型"
+)
+
+args = parser.parse_args()
+
+# Assign parsed arguments / 分配解析后的参数
+U_VALUE = args.u_value
+MAX_SAMPLES = args.max_samples
+DO_VALIDATE = args.do_validate
+VAL_STEPS = args.val_steps
+VAL_SAMPLES = args.val_samples
+TINYLORA_RANK = args.rank
+DATASET_NAME = args.dataset
+USE_QUANT = not args.no_quant
 
 print(f"\n{'='*60}")
 print(f"📋 Training Configuration / 训练配置")
@@ -72,6 +126,7 @@ if MAX_SAMPLES is not None:
     print(f"Max training samples / 最大训练样本数: {MAX_SAMPLES}")
 else:
     print(f"Max training samples / 最大训练样本数: unlimited")
+print(f"Dataset / 数据集: {DATASET_NAME}")
 print(f"Quantization / 量化加载: {'4-bit (NF4)' if USE_QUANT else 'BF16 (no quant)'}")
 print(f"Validation enabled / 启用验证: {DO_VALIDATE}")
 if DO_VALIDATE:
@@ -124,15 +179,14 @@ REWARD_SCALING_CONFIG = {
 }
 
 # ========== Model Configuration ==========
-# ========== 模型配置 ==========
+
 MS_MODEL_ID = "qwen/Qwen2.5-Coder-3B-Instruct"
 LOCAL_MODEL_DIR = "./models/Qwen2.5-Coder-3B-Instruct"
 OUTPUT_DIR = "./output/luoguqwencoder-lora"
 
 
 
-#  Qwen2.5-Coder-3B-Instruct
-# ========== 下载模型 ==========
+# ============ Load Model =============
 if not os.path.exists(LOCAL_MODEL_DIR):
     print(f"Download from ModelScope/从ModelScope下载模型 {MS_MODEL_ID} 到 {LOCAL_MODEL_DIR}...")
     snapshot_download(
@@ -144,7 +198,6 @@ else:
     print(f"Load from local/本地已存在模型，直接加载：{LOCAL_MODEL_DIR}")
 
 # ========== Load tokenizer =========
-# ========== 加载 tokenizer ==========
 tokenizer = AutoTokenizer.from_pretrained(
     LOCAL_MODEL_DIR,
     trust_remote_code=True,
@@ -154,7 +207,6 @@ tokenizer.padding_side = "right"
 
 
 # ========== Multi-GPU / DDP Support ==========
-# ========== 多卡 / DDP 支持 ==========
 # When using torchrun (DDP), each process must load the FULL model on its own GPU.
 # device_map="auto" would split the model across GPUs, conflicting with DDP.
 # 使用 torchrun (DDP) 时，每个进程必须在自己的 GPU 上加载完整模型。
@@ -162,9 +214,9 @@ tokenizer.padding_side = "right"
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
 print(f"🖥️ LOCAL_RANK: {LOCAL_RANK}")
 
-# ========== Load model =====
+# ========== Load model and whether USE_QUANT =====
 
-# ========== 加载模型（根据 USE_QUANT 决定是否 4bit 量化）==========
+
 if USE_QUANT:
     print("📦 Loading model with 4-bit quantization / 以 4-bit 量化加载模型...")
     bnb_config = BitsAndBytesConfig(
@@ -176,13 +228,13 @@ if USE_QUANT:
     model = AutoModelForCausalLM.from_pretrained(
         LOCAL_MODEL_DIR,
         quantization_config=bnb_config,
-        device_map={"":  LOCAL_RANK},  # 多卡DDP: 每个rank加载完整模型到自己的GPU / Multi-GPU DDP: each rank loads full model on its own GPU
+        device_map={"":  LOCAL_RANK},  
+        # 多卡DDP: 每个rank加载完整模型到自己的GPU / Multi-GPU DDP: each rank loads full model on its own GPU
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         # dtype=torch.bfloat16,
     )
     model.config.use_cache = False
-    # 准备模型进行 k-bit 训练
     model = prepare_model_for_kbit_training(model)
 else:
     print("📦 Loading model without quantization (BF16) / 以 BF16 无量化加载模型...")
@@ -190,7 +242,7 @@ else:
         LOCAL_MODEL_DIR,
         device_map={"":  LOCAL_RANK},
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
     )
     model.config.use_cache = False
 
@@ -215,6 +267,7 @@ print("It's normal to see many lines of 'replace'./看到很多替换日志是�
 # 【关键】固定随机种子，确保 P 矩阵可复现
 # 保存模型时只存 v 向量，加载时需要用相同种子重建 P 矩阵
 
+# =======  SEED FIX FOR REPRODUCIBILITY / 可复现性种子固定 =======
 TINYLORA_SEED = 212
 torch.manual_seed(TINYLORA_SEED)
 torch.cuda.manual_seed(TINYLORA_SEED)
@@ -249,30 +302,54 @@ print(f"Trainable parameters/可训练参数量: {trainable_params}")
 if trainable_params != U_VALUE:
     raise RuntimeError(f"警告：可训练参数数量为 {trainable_params}，预期为 {U_VALUE}！")
 
-# ========== Code Reward Function ==========
 
 # ========== Code Reward Function ==========
 # Note: compile_and_run is now imported from utils.py / 注意：compile_and_run 现在从 utils.py 导入
 
-def code_reward_func(prompts, completions, public_tests=None, private_tests=None, generated_tests=None, source=None, difficulty=None, **kwargs):
+
+def convert_io_to_test_cases(io_data):
+    """
+    Convert DeepCoder's tests format to test cases list.
+    DeepCoder format: {"inputs": [...], "outputs": [...]}
+    Returns: [{"input": ..., "output": ...}, ...]
+    """
+    if not io_data:
+        return []
+
+    inputs = io_data.get("inputs", [])
+    outputs = io_data.get("outputs", [])
+
+    # Ensure lists
+    if not isinstance(inputs, list):
+        inputs = [inputs]
+    if not isinstance(outputs, list):
+        outputs = [outputs]
+
+    test_cases = []
+    for inp, out in zip(inputs, outputs):
+        test_cases.append({"input": inp, "output": out})
+
+    return test_cases
+
+
+def code_reward_func(prompts, completions, public_tests=None, private_tests=None, generated_tests=None, source=None, difficulty=None, input_output=None, **kwargs):
     """
     GRPO reward function for code evaluation / GRPO 的奖励函数
-    
-    For deepmind/code_contests dataset:
-    - public_tests, private_tests, generated_tests: dicts with 'input' and 'output' as lists
-    - We evaluate against public_tests, private_tests, and generated_tests
-    
-    对于 deepmind/code_contests 数据集：
-    - public_tests, private_tests, generated_tests：包含 'input' 和 'output' 列表的字典
-    - 对 public_tests, private_tests 和 generated_tests 进行评估
-    
+
+    Supports both:
+    1. deepmind/code_contests dataset:
+       - public_tests, private_tests, generated_tests: dicts with 'input' and 'output' as lists
+
+    2. DeepCoder dataset (agentica-org/DeepCoder-Preview-Dataset):
+       - input_output: dict with 'inputs' and 'outputs' as lists
+
     Reward rules / 奖励规则：
     - Compile fail or invalid format: 0.0 / 编译失败或无效格式：0.0
     - Compile success, partial tests pass: 0.5-0.99 / 编译成功，部分测试通过：0.5-0.99
     - All tests pass: 1.0 / 所有测试通过：1.0
     """
     rewards = []
-    
+
     # Convert None to empty lists / 将 None 转换为空列表
     if public_tests is None:
         public_tests = [None] * len(completions)
@@ -280,55 +357,71 @@ def code_reward_func(prompts, completions, public_tests=None, private_tests=None
         private_tests = [None] * len(completions)
     if generated_tests is None:
         generated_tests = [None] * len(completions)
+    if input_output is None:
+        input_output = [None] * len(completions)
     if source is None:
         source = [0] * len(completions)
     if difficulty is None:
         difficulty = [0] * len(completions)
-    
+
     # Iterate through each generated completion / 遍历每一条生成的回复
-    for completion, pub_test, priv_test, gen_test, src, diff in zip(
-        completions, public_tests, private_tests, generated_tests, source, difficulty
-    ):
+    for i, (completion, pub_test, priv_test, gen_test, io_test, src, diff) in enumerate(zip(
+        completions, public_tests, private_tests, generated_tests, input_output, source, difficulty
+    )):
         # 1. Extract code using utility function / 使用工具函数提取代码
         code = extract_code_from_response(completion)
-        
+
         if not code:
             rewards.append(0.0)  # No valid code found / 未找到有效代码
             continue
 
-        # 2. Parse test cases using utility function / 使用工具函数解析测试用例
+        # 2. Parse test cases - support both dataset formats
         test_cases_list = []
-        test_cases_list.extend(convert_hf_tests_to_list(pub_test))
-        test_cases_list.extend(convert_hf_tests_to_list(priv_test))
-        test_cases_list.extend(convert_hf_tests_to_list(gen_test))
-        
+
+        # Try DeepCoder format first (input_output)
+        if io_test is not None:
+            test_cases_list.extend(convert_io_to_test_cases(io_test))
+
+        # Fallback to CodeContests format (public/private/generated tests)
+        if not test_cases_list:
+            test_cases_list.extend(convert_hf_tests_to_list(pub_test))
+            test_cases_list.extend(convert_hf_tests_to_list(priv_test))
+            test_cases_list.extend(convert_hf_tests_to_list(gen_test))
+
         # If no test cases extracted, give penalty / 如果没有提取到测试用例，给予惩罚
         if not test_cases_list:
             rewards.append(0.0)
             continue
-        
+
+        # Limit test cases during training to avoid excessive subprocess fork pressure
+        # (each subprocess.run forks the large model process; too many forks → OOM killer)
+        # 限制测试用例数量避免大量fork导致OOM：训练中5个测试用例足以提供奖励信号
+        test_cases_list = test_cases_list[:5]
+
         # 3. Run code against all test cases / 对所有测试用例运行代码
         base_reward = compile_and_run(code, test_cases_list)
-        
+
         # 4. REWARD SCALING - Adjust based on source and difficulty
         # 奖励缩放 - 根据源和难度从 REWARD_SCALING_CONFIG 查找
         reward_multiplier = 1.0
-        
-        if src in REWARD_SCALING_CONFIG:
-            source_scaling = REWARD_SCALING_CONFIG[src]
-            if diff in source_scaling:
-                reward_multiplier = source_scaling[diff]
-            elif -1 in source_scaling:  # Fallback for unknown difficulty
-                reward_multiplier = source_scaling[-1]
-        
+
+        # DeepCoder dataset doesn't have source/difficulty, skip scaling
+        if src != 0 or diff != 0:  # Only apply scaling for CodeContests
+            if src in REWARD_SCALING_CONFIG:
+                source_scaling = REWARD_SCALING_CONFIG[src]
+                if diff in source_scaling:
+                    reward_multiplier = source_scaling[diff]
+                elif -1 in source_scaling:  # Fallback for unknown difficulty
+                    reward_multiplier = source_scaling[-1]
+
         final_reward = base_reward * reward_multiplier
         rewards.append(final_reward)
-        
+
     return rewards
         
        
 
-# 【最终方案】绕过 Trainer 对纯量化模型的检查（仅在量化模式下需要）
+# 绕过 Trainer 对纯量化模型的检查（仅在量化模式下需要）
 # Trainer 的检查逻辑 (transformers/trainer.py):
 #   _is_quantized_and_base_model = model.is_quantized AND NOT model._hf_peft_config_loaded
 #   if _is_quantized_and_base_model and not isinstance(model, PeftModel): raise ValueError
@@ -414,64 +507,164 @@ def filter_dataset(dataset, config, max_samples, seed=42):
     return filtered_dataset
 
 
-# Note: apply_chat_template is now imported from tiny_lora_utils.py
-# 注意：apply_chat_template 现在从 tiny_lora_utils.py 导入
-
-
 
 # ========== Load dataset ==========
 # When using load_dataset("json", data_files="....jsonl"),
 # HuggingFace defaults to classifying the file as 'train' split.
 # Note: data_files points to processed file path from download_dataset.py
 # split="train" is important! Trainer needs Dataset object, not DatasetDict
-# 
-# ========== 加载数据集 ==========
-
-rl_dataset = load_dataset(
-    "json", 
-    data_files="./local_code_contests/code_contests_train.jsonl",
-    split="train"
-)
-
-# Apply filtering based on source and difficulty configuration
-# 根据数据源和难度配置应用过滤
-rl_dataset = filter_dataset(
-    dataset=rl_dataset,
-    config=DATASET_CONFIG,
-    max_samples=MAX_SAMPLES,
-    seed=TINYLORA_SEED
-)
+#
 
 
+# Select dataset based on DATASET_NAME
+
+if DATASET_NAME == 'deepcoder':
+    # DeepCoder has multiple configs: codeforces, lcbv5, primeintellect, taco
+    print(f"📂 Loading DeepCoder dataset from ./local_Deep-Coder-Preview-Dataset/")
+
+    # Load all config files
+    deepcoder_files = [
+        "./local_Deep-Coder-Preview-Dataset/deepcoder_codeforces_train.jsonl",
+        "./local_Deep-Coder-Preview-Dataset/deepcoder_lcbv5_train.jsonl",
+        "./local_Deep-Coder-Preview-Dataset/deepcoder_primeintellect_train.jsonl",
+        "./local_Deep-Coder-Preview-Dataset/deepcoder_taco_train.jsonl",
+    ]
+
+    # Check which files exist
+    existing_files = [f for f in deepcoder_files if os.path.exists(f)]
+    if not existing_files:
+        raise FileNotFoundError(
+            f"DeepCoder dataset files not found! Please run download_DeepCoder-Preview-Dataset.py first.\n"
+            f"Expected files: {deepcoder_files}"
+        )
+
+    print(f"   Loading from: {[os.path.basename(f) for f in existing_files]}")
+
+    # Use streaming to avoid OOM - load samples one by one
+    # 使用streaming避免OOM - 逐个加载样本
+    from datasets import Dataset
+
+    # First, count total samples to estimate memory needs
+    print("   Counting total samples (streaming)...")
+    total_samples = 0
+    for f in existing_files:
+        with open(f, 'r', encoding='utf-8') as fp:
+            for _ in fp:
+                total_samples += 1
+    print(f"   Total samples available: {total_samples}")
+
+    # Sample MAX_SAMPLES directly using streaming
+    # 直接使用streaming采样MAX_SAMPLES个样本
+    print(f"   Streaming and sampling {MAX_SAMPLES} samples...")
+
+    import random
+    import json as _json
+    random.seed(TINYLORA_SEED)
+
+    # Reservoir sampling via direct file I/O (avoids HuggingFace Arrow overhead)
+    # 通过直接文件读取做reservoir采样（避免HuggingFace Arrow格式转换开销）
+    reservoir = []
+    sample_count = 0
+    for f in existing_files:
+        with open(f, 'r', encoding='utf-8') as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                sample = _json.loads(line)
+
+                # Trim input_output to first 5 test cases at load time
+                # Some samples carry huge test cases (200K+ chars each), causing
+                # multi-GB memory bloat → OOM kill.  5 cases suffice for reward signal.
+                io = sample.get("input_output")
+                if isinstance(io, dict):
+                    inputs  = io.get("inputs",  [])[:5]
+                    outputs = io.get("outputs", [])[:5]
+                    sample["input_output"] = {"inputs": inputs, "outputs": outputs}
+
+                sample_count += 1
+                if len(reservoir) < MAX_SAMPLES:
+                    reservoir.append(sample)
+                else:
+                    idx = random.randint(0, sample_count - 1)
+                    if idx < MAX_SAMPLES:
+                        reservoir[idx] = sample
+    rl_dataset = Dataset.from_list(reservoir)
+
+    print(f"✅ Loaded {len(rl_dataset)} DeepCoder samples (streaming)")
+
+elif DATASET_NAME == 'code_contests':
+    print(f"📂 Loading CodeContests dataset from ./local_code_contests/code_contests_train.jsonl")
+    rl_dataset = load_dataset(
+        "json",
+        data_files="./local_code_contests/code_contests_train.jsonl",
+        split="train"
+    )
+    # Apply filtering based on source and difficulty configuration
+    # 根据数据源和难度配置应用过滤
+    rl_dataset = filter_dataset(
+        dataset=rl_dataset,
+        config=DATASET_CONFIG,
+        max_samples=MAX_SAMPLES,
+        seed=TINYLORA_SEED
+    )
+    print(f"✅ Loaded {len(rl_dataset)} CodeContests samples")
+
+else:
+    raise ValueError(f"Unknown dataset: {DATASET_NAME}. Choose 'deepcoder' or 'code_contests'")
 
 # Apply template / 应用模版
-rl_dataset = rl_dataset.map(lambda x: apply_chat_template(x, tokenizer))
+# Use batched=False and num_proc=1 to reduce memory usage
+print("⏳ Applying chat template...")
+# Columns needed by code_reward_func must be preserved after map
+# reward함수에 필요한 컬럼은 map 이후에도 보존해야 함
+_reward_columns = {'prompt', 'input_output', 'public_tests', 'private_tests', 'generated_tests', 'source', 'difficulty'}
+rl_dataset = rl_dataset.map(
+    lambda x: apply_chat_template(x, tokenizer),
+    batched=False,
+    num_proc=1,
+    remove_columns=[c for c in rl_dataset.column_names if c not in _reward_columns]
+)
 
 # Print sample to verify / 打印一条数据验证
 print(f"✅ Dataset loaded successfully! / 数据加载成功！Total samples / 样本数量: {len(rl_dataset)}")
 print(f"📝 Sample data / 样例数据: {rl_dataset[0]}")
 
+
+
 # ========== Load Validation Dataset (if enabled) ==========
-# ========== 加载验证数据集（如果启用）==========
+
 val_dataset = None
 if DO_VALIDATE:
     print(f"\n{'='*60}")
     print(f"📊 Loading validation dataset / 正在加载验证数据集...")
     print(f"{'='*60}\n")
-    
-    val_dataset = load_dataset(
-        "json",
-        data_files="./local_code_contests/code_contests_valid.jsonl",
-        split="train"
-    )
-    
-    # Apply chat template to validation dataset / 对验证数据集应用模板
-    val_dataset = val_dataset.map(lambda x: apply_chat_template(x, tokenizer))
-    
-    print(f"✅ Validation dataset loaded / 验证数据集加载成功: {len(val_dataset)} samples / 样本\n")
+
+    # DeepCoder dataset does not have validation split
+    if DATASET_NAME == 'deepcoder':
+        print("⚠️  Warning / 警告:")
+        print("   DeepCoder dataset does not have validation data.")
+        print("   DeepCoder 数据集没有验证集，已自动跳过验证。")
+        print("   Validation is only available for code_contests dataset.")
+        print("   验证功能仅支持 code_contests 数据集。")
+        print(f"{'='*60}\n")
+        DO_VALIDATE = False  # Disable validation for deepcoder
+    else:
+        # CodeContests dataset has validation data
+        val_dataset = load_dataset(
+            "json",
+            data_files="./local_code_contests/code_contests_valid.jsonl",
+            split="train"
+        )
+
+        # Apply chat template to validation dataset / 对验证数据集应用模板
+        val_dataset = val_dataset.map(lambda x: apply_chat_template(x, tokenizer))
+
+        print(f"✅ Validation dataset loaded / 验证数据集加载成功: {len(val_dataset)} samples / 样本\n")
+
 
 # ========== Define Validation Callback ==========
-# ========== 定义验证回调 ==========
+
 class ValidationCallback(TrainerCallback):
     """
     Custom callback for validation during training / 训练期间验证的自定义回调
@@ -568,7 +761,6 @@ if DO_VALIDATE and val_dataset is not None:
 
 
 # ========== Configure and start GRPO training ==========
-# Configure GRPO / 配置 GRPO
 training_args = GRPOConfig(
     output_dir=OUTPUT_DIR,
     num_train_epochs=1,
@@ -582,10 +774,18 @@ training_args = GRPOConfig(
     save_strategy="no",             # Disable auto checkpoint (TinyLoRA is non-standard PEFT)
 
 
-    # 👇======================================================👇 
-    # updated in v3.1.1
-    beta=0.0,                       # deprecate KL penalty： empower the model to expolore more without constraints/去除 KL 散度惩罚：允许模型完全放飞自我去探索，不再受限于初始基座模型
-    clip_range=0.3,                 # expand Clip range / 扩大 Clip 范围:默认是 0.2。调大后允许模型在遇到正确解法时，以更大的步子更新策略
+    # 👇======================================================👇
+    # updated in v3.2 - Clip High (from DeepCoder/DAPO paper)
+    # Clip High: asymmetric clipping - increase upper bound to encourage more exploration
+    # Standard GRPO: clip range [1-ε, 1+ε], typically ε=0.2 or 0.3
+    # Clip High: clip range [1-ε, 1+ε_high] where ε_high > ε, enabling larger policy updates
+    # when correct solutions are found, preventing premature convergence
+    beta=0.0,                       # deprecate KL penalty: empower the model to explore more without constraints
+    epsilon=0.2,                    # lower bound clipping (1 - epsilon)
+    epsilon_high=0.8,               # upper bound clipping (1 + epsilon_high) - Clip High!
+
+    # deprecated in v3.1+, kept for backward compatibility
+    # clip_range=0.3,               # expand Clip range / 扩大 Clip 范围
     
 )
 

@@ -62,6 +62,38 @@ def print_step(title):
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Verify pipeline script - test the full training pipeline / 验证流水线脚本 - 测试完整训练流水线",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples / 示例:
+  python verify_pipeline.py
+  python verify_pipeline.py --no_quant
+  python verify_pipeline.py --max_tokens 512
+        """
+    )
+    parser.add_argument(
+        "--no_quant",
+        action="store_true",
+        help="Load model in BF16 without quantization / 不使用量化，以BF16加载模型"
+    )
+    parser.add_argument(
+        "--max_tokens",
+        type=int,
+        default=1024,
+        help="Maximum tokens to generate / 生成的最大token数 (default: 1024)"
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.6,
+        help="Sampling temperature / 采样温度 (default: 0.6)"
+    )
+
+    args = parser.parse_args()
+
     print_step("STEP 1: 加载模型与Tokenizer")
     
     # 检查 g++
