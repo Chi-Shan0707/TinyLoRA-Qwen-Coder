@@ -155,6 +155,7 @@ This section is organized by code-level **control blocks** (not flat knobs), mat
 
 - Detailed Usage Guide (includes data pipeline + validation/testing): [docs/usage_en.md](./docs/usage_en.md)
 - Changelog (detailed): [docs/changelog_en.md](./docs/changelog_en.md)
+- Known Pitfalls & Notes: [docs/warning_en.md](./docs/warning_en.md)
 - FAQ: [docs/faq_en.md](./docs/faq_en.md)
 - Paper Hub: [paper-Learning to Reason in 13 Parameters/README.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 - Technical Guide (EN default): [TECHNICAL_GUIDE.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/TECHNICAL_GUIDE.md)
@@ -350,6 +351,7 @@ python test.py --baseline --num_samples 50
 
 - 详细使用指南（含数据流水线 + 验证测试细节）： [docs/usage_zh.md](./docs/usage_zh.md)
 - 更新日志（详细版）： [docs/changelog_zn.md](./docs/changelog_zn.md)
+- 已知坑点与注意事项： [docs/warning_zn.md](./docs/warning_zn.md)
 - 常见问题： [docs/faq_zh.md](./docs/faq_zh.md)
 - 论文入口： [paper-Learning to Reason in 13 Parameters/README.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/README.md)
 - 技术文档（英文默认）： [TECHNICAL_GUIDE.md](./paper-Learning%20to%20Reason%20in%2013%20Parameters/TECHNICAL_GUIDE.md)
