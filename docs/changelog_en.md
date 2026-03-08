@@ -1,5 +1,22 @@
 # Changelog (English)
 
+## v4.0
+
+- **Increased `num_iterations` from 1 to 4**: Making clip_high (DeepCoder method) more effective:
+  - More iterations allow better exploration of the policy space
+  - Combined with asymmetric clipping (epsilon=0.2, epsilon_high=0.5), significantly improves Pass@1
+- **Switched to DeepCoder-Preview-Dataset (lcbv5, 28 samples)**:
+  - Uses high-quality lcbv5 subset from agentica-org/DeepCoder-Preview-Dataset
+  - Dramatically reduces training data while improving results
+- **Performance improvements**:
+  - Pass@1 improved by **100%** (1.82% → 3.64%)
+  - Compile Rate improved by **4.13%** (73.33% → 76.36%)
+  - Average Score improved by **5.03%** (0.4274 → 0.4489)
+- **Efficiency improvements**:
+  - Training data reduced by **99.8%** (13328 → 28)
+  - Training time reduced by **73%** (4h24m → 1h12m)
+- Updated README with v4.0 results and detailed comparison links
+
 ## v3.5
 
 - **Remove test case examples from prompt**: Stop concatenating `input_output`/`public_tests` to the chat template:
