@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧬 TinyLoRA-Qwen-Coder
+# 🧬 TinyLoRA-GRPO-Coder
 
 **Fine-tune a code model with configurable tiny parameters (default: 32) — and it actually works.**
 
@@ -9,15 +9,17 @@
 [![Model](https://img.shields.io/badge/Base-Qwen2.5--Coder--3B--Instruct-purple)](https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct)
 [![Dataset](https://img.shields.io/badge/Data-CodeContests-orange)](https://huggingface.co/datasets/deepmind/code_contests)
 [![Dataset](https://img.shields.io/badge/Data-DeepCoder-blue)](https://huggingface.co/datasets/agentica-org/DeepCoder-Preview-Dataset)
-![Version](https://img.shields.io/badge/Version-v4.0-red)
+![Version](https://img.shields.io/badge/Version-v4.1-red)
 
 <br>
 
 | 🔢 Parameters | 🧠 Base Model | 🎯 Task | ⚡ Method | 💾 VRAM |
 | :---: | :---: | :---: | :---: | :---: |
-| **u=32 (adjustable)** | Qwen2.5-Coder-3B(adjustable) | C++ Code Gen | GRPO (RL) | 16GB+ |
+| **u=32 (adjustable)** | **Qwen2.5-Coder-3B(adjustable)** | C++ Code Gen | GRPO (RL) | 16GB+ |
 
 </div>
+
+> **v4.1** — Rename this project from `TinyLoRA-Qwen-Coder` to `TinyLoRA-GRPO-Coder`.
 
 > **v4.0** — Increased `num_iterations=4` (making clip_high more effective) · DeepCoder-Preview-Dataset (lcbv5, 28 samples) · Pass@1 +100% · Training time -73%
 
