@@ -1,167 +1,79 @@
-# tiny_lora_v.pt — TinyLoRA Checkpoint
+# Output Artifacts
 
-<div align="center">
+**Language**: English | [中文](#中文)
 
-**TinyLoRA Training Artifact: Trained Global Vector & Reconstruction Metadata**
+This directory is intentionally kept lightweight. Large generated checkpoints should be produced locally by training and should not be committed unless there is a clear release reason.
 
-[中文版本](#中文版本) | [English Version](#english-version)
+## Current State
 
-</div>
+- `tiny_lora_v.pt` is not included in the repository.
+- Older diagonal TinyLoRA checkpoints were removed because they are incompatible with the current full `r x r` TinyLoRA implementation.
+- New checkpoints are produced by `train_rl.py` under `./output/luoguqwencoder-lora/` by default.
+
+## Checkpoint Schema
+
+A valid current checkpoint is a PyTorch dictionary with:
+
+- `global_v`: trained shared vector.
+- `u_value`: dimension of `global_v`.
+- `rank`: TinyLoRA SVD rank.
+- `seed`: random seed used to reproduce fixed projection matrices.
+- `model_id`: base model identifier.
+- `is_quantized`: whether training used 4-bit quantization.
+- `total_replaced_layers`: number of replaced linear layers.
+
+## Restore
+
+Use the project scripts instead of loading artifacts manually:
+
+```bash
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
+python validate.py --num_samples 50
+```
+
+For compatibility, ensure that `rank`, `seed`, quantization mode, and base model match the training run. The current TinyLoRA formula is:
+
+```text
+R = sum_i v_i P_i, where P_i is r x r
+Delta W = U @ diag(S) @ R @ Vh
+```
 
 ---
 
-# 中文版本
+## 中文
 
-## tiny_lora_v.pt — TinyLoRA 参数文件
+本目录仅保留轻量说明。大型训练产物应由本地训练生成，除非有明确发布需求，否则不应提交。
 
-本文件是通过训练得到的 LoRA 适配器检查点，包含训练后的全局共享向量和重建模型所需的全部元信息。
+### 当前状态
 
-### 文件内容
+- 仓库不再包含 `tiny_lora_v.pt`。
+- 旧的 diagonal TinyLoRA checkpoint 已删除，因为它们不兼容当前 full `r x r` TinyLoRA 实现。
+- 新 checkpoint 默认由 `train_rl.py` 生成到 `./output/luoguqwencoder-lora/`。
 
-- **文件位置**：`./output/luoguqwencoder-lora/tiny_lora_v.pt`
-- **文件类型**：PyTorch 字典（dict）
-- **包含字段**：
-  - `global_v`：训练好的共享向量（torch.Tensor），形状例 `shape=torch.Size([32])`，即 u 维向量。
-  - `u_value`：共享向量的维度（int），例如 32。
-  - `rank`：TinyLoRA 的 SVD 秩（int），通过 `--rank` 参数配置，默认为 2。
-  - `seed`：用于生成固定随机投影矩阵 P 的随机种子（int），例如 42。
-  - `model_id`：基座模型的 Hugging Face ID（str），例如 `qwen/Qwen2.5-Coder-3B-Instruct`。
-  - `total_replaced_layers`：被替换为 TinyLoRALinear 的 Linear 层总数（int），便于记录。
+### Checkpoint 字段
 
-### 快速恢复步骤
+当前有效 checkpoint 是 PyTorch 字典，包含：
 
-按以下步骤在本地恢复训练好的模型：
+- `global_v`：训练得到的共享向量。
+- `u_value`：`global_v` 的维度。
+- `rank`：TinyLoRA SVD rank。
+- `seed`：用于复现固定投影矩阵的随机种子。
+- `model_id`：基座模型标识。
+- `is_quantized`：训练是否使用 4-bit 量化。
+- `total_replaced_layers`：替换的线性层数量。
 
-```python
-import torch
-from transformers import AutoModelForCausalLM
-from transformers import BitsAndBytesConfig
+### 恢复方式
 
-# 1) 加载检查点
-sd = torch.load("./output/luoguqwencoder-lora/tiny_lora_v.pt", map_location="cpu")
+优先使用项目脚本：
 
-# 2) 提取元数据
-u = sd["u_value"]
-rank = sd["rank"]
-seed = sd["seed"]
-v = sd["global_v"]  # torch.Tensor
-model_id = sd.get("model_id", "qwen/Qwen2.5-Coder-3B-Instruct")
-
-# 3) 加载基座模型（须与训练时的量化/device_map 配置一致）
-#    这里使用 4bit 量化，与训练脚本保持一致
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_compute_dtype=torch.float16,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    device_map="auto",
-    quantization_config=quantization_config,
-)
-
-# 4) 创建 global params 容器并加载 v（使用 train_rl.py 中的 TinyLoRAGlobalParams）
-#    确保使用相同 u 值、相同随机种子
-from train_rl import TinyLoRAGlobalParams, apply_tiny_lora
-
-device = model.model.layers[0].self_attn.q_proj.weight.device
-global_params = TinyLoRAGlobalParams(u_dim=u, device=device, dtype=torch.bfloat16)
-with torch.no_grad():
-    global_params.global_v.copy_(v.to(global_params.global_v.dtype).to(device))
-
-# 5) 固定随机种子并注入 TinyLoRA（这会生成与训练时相同的 P 矩阵）
-torch.manual_seed(seed)
-apply_tiny_lora(model, global_params, rank=rank)
-
-# 6) 验证加载成功
-print(f"成功加载 TinyLoRA 模型")
-print(f"global_v 形状: {global_params.global_v.shape}")
-print(f"替换的 Linear 层数: {sd.get('total_replaced_layers', 'N/A')}")
+```bash
+python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
+python validate.py --num_samples 50
 ```
 
-### 重要说明
+恢复时需要保证 `rank`、`seed`、量化模式和基座模型与训练时一致。当前 TinyLoRA 公式为：
 
-- **量化配置一致性**：恢复时务必使用与训练相同的量化配置（4bit NF4）。
-- **随机种子**：P 矩阵的生成依赖于随机种子。使用相同的 `seed` 值保证 P 矩阵完全一致。
-- **SVD 决定性**：SVD 分解是确定性运算，所以 U、S、Vh 完全可复现。
-- **完全复现**：结合相同的 `u_value`、`rank`、`seed` 和基座模型，可实现 100% 可复现的增量权重重建。
-
----
-
-# English Version
-
-## tiny_lora_v.pt — TinyLoRA Checkpoint
-
-This file is the trained LoRA adapter checkpoint containing the trained global shared vector and all metadata needed to reconstruct the model.
-
-### File Contents
-
-- **Path**: `./output/luoguqwencoder-lora/tiny_lora_v.pt`
-- **Type**: PyTorch dict
-- **Fields**:
-  - `global_v`: Trained shared vector (torch.Tensor), e.g., shape=[32] (u-dimensional vector).
-  - `u_value`: Dimension of the shared vector (int), e.g., 32.
-  - `rank`: SVD rank of TinyLoRA (int), configurable via `--rank` argument, default 2.
-  - `seed`: Random seed for generating fixed random projection matrices P (int), e.g., 42.
-  - `model_id`: Hugging Face model ID of the base model (str), e.g., `qwen/Qwen2.5-Coder-3B-Instruct`.
-  - `total_replaced_layers`: Total number of Linear layers replaced with TinyLoRALinear (int).
-
-### Quick Restore Steps
-
-Follow these steps to restore the trained model locally:
-
-```python
-import torch
-from transformers import AutoModelForCausalLM
-from transformers import BitsAndBytesConfig
-
-# 1) Load checkpoint
-sd = torch.load("./output/luoguqwencoder-lora/tiny_lora_v.pt", map_location="cpu")
-
-# 2) Extract metadata
-u = sd["u_value"]
-rank = sd["rank"]
-seed = sd["seed"]
-v = sd["global_v"]  # torch.Tensor
-model_id = sd.get("model_id", "qwen/Qwen2.5-Coder-3B-Instruct")
-
-# 3) Load base model (must use same quantization/device_map as training)
-#    Using 4-bit quantization consistent with training
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_compute_dtype=torch.float16,
-)
-model = AutoModelForCausalLM.from_pretrained(
-    model_id,
-    device_map="auto",
-    quantization_config=quantization_config,
-)
-
-# 4) Create global params container and load v (using TinyLoRAGlobalParams from train_rl.py)
-#    Ensure using same u value and random seed
-from train_rl import TinyLoRAGlobalParams, apply_tiny_lora
-
-device = model.model.layers[0].self_attn.q_proj.weight.device
-global_params = TinyLoRAGlobalParams(u_dim=u, device=device, dtype=torch.bfloat16)
-with torch.no_grad():
-    global_params.global_v.copy_(v.to(global_params.global_v.dtype).to(device))
-
-# 5) Fix random seed and inject TinyLoRA (generates identical P matrices)
-torch.manual_seed(seed)
-apply_tiny_lora(model, global_params, rank=rank)
-
-# 6) Verify successful loading
-print(f"TinyLoRA model loaded successfully")
-print(f"global_v shape: {global_params.global_v.shape}")
-print(f"Total replaced layers: {sd.get('total_replaced_layers', 'N/A')}")
+```text
+R = sum_i v_i P_i，其中 P_i 是 r x r 矩阵
+Delta W = U @ diag(S) @ R @ Vh
 ```
-
-### Important Notes
-
-- **Quantization Consistency**: Always use the same quantization config (4-bit NF4) as training when restoring.
-- **Random Seed**: P matrices are generated based on the random seed. Using the same `seed` ensures identical P matrices.
-- **SVD Determinism**: SVD is a deterministic operation, so U, S, Vh are fully reproducible.
-- **Full Reproducibility**: Combined with identical `u_value`, `rank`, `seed`, and base model, 100% reproducible delta weight reconstruction is guaranteed.

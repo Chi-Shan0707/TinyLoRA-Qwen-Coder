@@ -101,6 +101,10 @@ $$W' = W + U_r \Sigma_r \left( \sum_{i=1}^{u} v_i P_i \right) V_r^\top$$
 | $P_i \in \mathbb{R}^{r \times r}$ | $u \times r \times r$ | 固定随机投影矩阵，通常从 $\mathcal{N}(0, 1/r)$ 采样 |
 | $\mathbf{v} \in \mathbb{R}^u$ | $u$ | **唯一可训练参数**，学习如何重组随机基底 |
 
+实现说明：主训练代码使用论文中的完整随机基矩阵形式
+`R = Σ_i v_i P_i`，其中每个 `P_i` 都是 `r × r`，并且所有被包装层复用同一组固定
+projection bank。旧的 diagonal checkpoint 不再兼容。
+
 ### 2.3 权重绑定策略
 
 为了达到"13 个参数"的极致，TinyLoRA 实施了跨层、跨模块的参数共享：

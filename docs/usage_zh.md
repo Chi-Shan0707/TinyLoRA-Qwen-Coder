@@ -13,7 +13,11 @@ pip install -r requirements.txt
 2. 准备数据：
 
 ```bash
-python download_dataset.py
+# CodeContests 数据集（train + valid + test）
+python download_code_contests.py --splits train valid test
+
+# 可选 DeepCoder 预处理
+python download_DeepCoder-Preview-Dataset.py
 ```
 
 3. 可选流水线自检：
@@ -29,6 +33,7 @@ python train_rl.py 32 2000
 python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 python train_rl.py 32 2000 --no_quant
 python train_rl.py 32 2000 --rank 4
+python train_rl.py 32 2000 --dataset deepcoder
 ```
 
 **训练命令行参数：**
@@ -39,17 +44,21 @@ python train_rl.py 32 2000 --rank 4
 - `--val_samples N`：验证样本数（默认：10）
 - `--no_quant`：禁用4-bit量化，以BF16加载模型
 - `--rank N`：TinyLoRA SVD 秩（默认：2）
+- `--dataset NAME`：选择 `code_contests` 或 `deepcoder`
+- `--model_id NAME`：local model directory 缺失时使用的 ModelScope model ID
+- `--local_model_dir PATH`：本地模型目录
+- `--output_dir PATH`：checkpoint 和 trainer 文件输出目录
 
 5. 评估：
 
 ```bash
-python validate.py 50
+python validate.py --num_samples 50
 python test.py --checkpoint_path ./output/luoguqwencoder-lora/tiny_lora_v.pt --num_samples 50
 python test.py --baseline --num_samples 50
 ```
 
 **验证命令行参数：**
-- `num_samples`（位置参数）：验证样本数（默认：10）
+- `--num_samples N`：验证样本数（默认：10）
 - `--no_quant`：禁用4-bit量化进行验证
 
 **测试命令行参数：**
@@ -73,7 +82,7 @@ python test.py --baseline --num_samples 50
 
 ### 预处理入口
 
-- 脚本：`download_dataset.py`
+- 脚本：`download_code_contests.py`
 - 结果：在本地生成 train/valid/test 三份 jsonl，供 `train_rl.py`、`validate.py`、`test.py` 使用。
 
 ### 训练数据控制项
@@ -102,7 +111,7 @@ python train_rl.py 32 2000 --do_validate --val_steps 100 --val_samples 10
 ### 训练后验证
 
 ```bash
-python validate.py 50
+python validate.py --num_samples 50
 ```
 
 - 对指定样本规模进行验证评估。

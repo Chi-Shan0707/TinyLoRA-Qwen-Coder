@@ -82,6 +82,11 @@ Where:
 - $P_i$: fixed random projection matrices
 - $v \in \mathbb{R}^u$: the only trainable vector
 
+Implementation note: the main training code uses the full random-basis matrix
+form from the paper, `R = Σ_i v_i P_i`, where each `P_i` is `r × r`.
+The same fixed projection bank is reused across wrapped layers. Legacy diagonal
+checkpoints are intentionally not supported.
+
 ### 2.3 Parameter tying
 
 With global tying, many layers share one vector $v$.
