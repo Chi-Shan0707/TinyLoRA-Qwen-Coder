@@ -2,8 +2,8 @@ import torch
 import os
 import subprocess
 
-# Import all shared utilities from utils.py — single source of truth for all pipeline stages
-# 从 utils.py 导入所有共享工具 — 训练/验证/测试/流水线验证的单一真相来源
+# Import all shared utilities from utils.py - single source of truth for all pipeline stages
+# Import shared utilities from utils.py
 from utils import (
     compile_and_run,
     extract_code_from_response,
@@ -12,18 +12,18 @@ from utils import (
     get_model_and_tokenizer,
 )
 
-# ==================== 配置区域 ====================
+# Configuration section
 MS_MODEL_ID = "qwen/Qwen2.5-Coder-3B-Instruct"
 LOCAL_MODEL_DIR = "./models/Qwen2.5-Coder-3B-Instruct"
 
 # Multi-GPU / DDP: LOCAL_RANK is read from environment by get_model_and_tokenizer internally.
 # It uses device_map={"":LOCAL_RANK} so each rank holds the full model on its own GPU.
 # See utils.py get_model_and_tokenizer for the full DDP-safe implementation.
-# 多卡 / DDP：LOCAL_RANK 由 get_model_and_tokenizer 内部读取并处理，这里仅用于日志显示。
+# Used here for logging only
 LOCAL_RANK = int(os.environ.get("LOCAL_RANK", 0))
 
-# 【关键】使用 CodeContests 数据结构进行测试
-# 这里使用一个简单的括号匹配问题作为测试题（来自实际数据集）
+# Use CodeContests-style data for testing
+# Use a simple sample problem for testing
 TEST_DATA_JSON = {
     "description": """Problem description.
 You are smart. You like maths. You are given a problem.
@@ -65,139 +65,147 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Verify pipeline script - test the full training pipeline / 验证流水线脚本 - 测试完整训练流水线",
+        description="Verify pipeline script - test the full training pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples / 示例:
+Examples:
   python verify_pipeline.py
   python verify_pipeline.py --no_quant
   python verify_pipeline.py --max_tokens 512
+  python verify_pipeline.py --model ./models/Qwen3-0.6B --no_quant --max_tokens 128
+  python verify_pipeline.py --model ./models/Qwen3-0.6B --no_quant --skip_generation
         """
     )
     parser.add_argument(
         "--no_quant",
         action="store_true",
-        help="Load model in BF16 without quantization / 不使用量化，以BF16加载模型"
+        help="Load model in BF16 without quantization"
     )
     parser.add_argument(
         "--max_tokens",
         type=int,
         default=1024,
-        help="Maximum tokens to generate / 生成的最大token数 (default: 1024)"
+        help="Maximum tokens to generate (default: 1024)"
     )
     parser.add_argument(
         "--temperature",
         type=float,
         default=0.6,
-        help="Sampling temperature / 采样温度 (default: 0.6)"
+        help="Sampling temperature (default: 0.6)"
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Local model directory or model ID. Defaults to the configured local Qwen2.5-Coder path if present."
+    )
+    parser.add_argument(
+        "--skip_generation",
+        action="store_true",
+        help="Stop after model/tokenizer loading and chat-template validation."
     )
 
     args = parser.parse_args()
 
-    print_step("STEP 1: 加载模型与Tokenizer")
+    print_step("STEP 1: Load model and tokenizer")
     
-    # 检查 g++
+    # Check g++
     try:
         subprocess.run(['g++', '--version'], capture_output=True)
-        print("✅ 检测到 g++ 编译器")
+        print("g++ compiler detected.")
     except:
-        print("❌ 未检测到 g++，请先安装 (sudo apt install g++)")
+        print("g++ was not detected. Please install it first, for example: sudo apt install g++")
         return
 
-    model_path = LOCAL_MODEL_DIR if os.path.exists(LOCAL_MODEL_DIR) else MS_MODEL_ID
-    print(f"🖥️ LOCAL_RANK: {LOCAL_RANK}")
+    model_path = args.model or (LOCAL_MODEL_DIR if os.path.exists(LOCAL_MODEL_DIR) else MS_MODEL_ID)
+    print(f"[DEVICE] LOCAL_RANK: {LOCAL_RANK}")
 
     # Use get_model_and_tokenizer from utils.py:
     #   - device_map={{"":LOCAL_RANK}}: DDP-safe, each process holds full model on its own GPU
     #   - torch_dtype=bfloat16: non-quantized layers (Embedding/LayerNorm) use BF16, not FP32
     #   - for_inference=True: enables KV cache, skips gradient checkpointing
-    # 使用 utils.py 的 get_model_and_tokenizer：
-    #   - device_map={{"":LOCAL_RANK}}：DDP 安全，每个进程在自己 GPU 持有完整模型
-    #   - torch_dtype=bfloat16：非量化层使用 BF16，不退化为 FP32
-    #   - for_inference=True：启用 KV cache，跳过梯度检查点
-    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=True, for_inference=True)
+    model, tokenizer = get_model_and_tokenizer(model_path, use_4bit=not args.no_quant, for_inference=True)
 
     # ------------------------------------------------------------------
-    print_step("STEP 2: 验证 Chat Template (JSON -> Qwen Prompt)")
+    print_step("STEP 2: Verify chat template (JSON -> Qwen prompt)")
     
-    # Use apply_chat_template from utils.py — identical logic to training, guarantees distribution consistency
-    # 使用 utils.py 的 apply_chat_template — 与训练时完全相同的逻辑，保证 prompt 分布一致
+    # Use apply_chat_template from utils.py - identical logic to training, guarantees distribution consistency
     final_prompt = apply_chat_template(TEST_DATA_JSON, tokenizer)['prompt']
     
-    print("--- 最终输入给模型的 Prompt 开头部分 ---")
+    print("--- Prompt prefix sent to the model ---")
     print(final_prompt[:300] + "...\n")
-    print("--- 最终输入给模型的 Prompt 结尾部分 ---")
+    print("--- Prompt suffix sent to the model ---")
     print("..." + final_prompt[-100:])
     
-    # 检查关键标签
     if "<|im_start|>system" in final_prompt and "<|im_start|>assistant" in final_prompt:
-        print("\n✅ 模版格式检查通过 (检测到 Qwen ChatML 标签)")
+        print("\nChat template check passed: Qwen ChatML tags detected.")
     else:
-        print("\n❌ 警告：未检测到 ChatML 标签，请检查 tokenizer_config.json")
+        print("\nWarning: ChatML tags were not detected. Check tokenizer_config.json.")
+
+    if args.skip_generation:
+        print("\nSkipping generation as requested. Load and prompt checks completed.")
+        return
 
     # ------------------------------------------------------------------
-    print_step("STEP 3: 执行模型生成")
+    print_step("STEP 3: Run model generation")
     
     inputs = tokenizer([final_prompt], return_tensors="pt")
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
     
-    print(f"Prompt token 长度: {inputs.input_ids.shape[1]}")
-    print("正在生成 (Max 1024 tokens)...")
+    print(f"Prompt token length: {inputs['input_ids'].shape[1]}")
+    print(f"Generating (max {args.max_tokens} tokens)...")
     
     with torch.no_grad():
         generated_ids = model.generate(
             **inputs,
-            max_new_tokens=1024,
+            max_new_tokens=args.max_tokens,
             do_sample=True,     
-            temperature=0.6,
+            temperature=args.temperature,
             top_p=0.9,
             pad_token_id=tokenizer.pad_token_id
         )
     
-    # 解码
+    # Decode
     full_response = tokenizer.batch_decode(generated_ids, skip_special_tokens=False)[0]
     
-    # 只要生成部分
+    # Keep only the generated part
     if "<|im_start|>assistant" in full_response:
         response_only = full_response.split("<|im_start|>assistant")[-1]
     else:
         response_only = full_response
     
-    print("\n--- 模型生成的代码部分 (前1000字符) ---")
+    print("\n--- Generated code preview (first 1000 characters) ---")
     print(response_only[:1000] + "..." if len(response_only)>500 else response_only)
 
     # ------------------------------------------------------------------
-    print_step("STEP 4: 验证代码提取与评测 (基于 CodeContests 格式)")
+    print_step("STEP 4: Verify code extraction and evaluation (CodeContests format)")
     
     # Use extract_code_from_response from utils.py (returns str, empty string if not found)
-    # 使用 utils.py 的 extract_code_from_response（返回 str，未找到时返回空字符串）
     extracted_code = extract_code_from_response(response_only)
 
-    # Use convert_hf_tests_to_list from utils.py — same parsing as training reward function
-    # 使用 utils.py 的 convert_hf_tests_to_list — 与训练奖励函数解析逻辑完全一致
+    # Use convert_hf_tests_to_list from utils.py - same parsing as training reward function
     test_cases = []
     for test_type in ['public_tests', 'private_tests', 'generated_tests']:
         test_cases.extend(convert_hf_tests_to_list(TEST_DATA_JSON.get(test_type, {})))
 
     if extracted_code:
-        print(f"✅ 成功提取代码")
-        print(f"正在使用 {len(test_cases)} 个测试用例进行评测...")
+        print("Code extracted successfully.")
+        print(f"Evaluating with {len(test_cases)} test cases...")
 
         # Use compile_and_run from utils.py (returns float: 0.0 / 0.5 / 1.0)
-        # 使用 utils.py 的 compile_and_run（返回 float：0.0 / 0.5 / 1.0），与训练奖励函数完全相同
         score = compile_and_run(extracted_code, test_cases)
 
-        print(f"\n📊 最终得分 (Reward): {score}")
+        print(f"\nFinal reward: {score}")
 
         if score == 1.0:
-            print("🎉 结论：Pipeline 完美通过！模型成功解出了题目。")
+            print("Pipeline passed perfectly: the model solved the problem.")
         elif score > 0.0:
-            print("⚠️ 结论：Pipeline 通畅，代码可运行，但部分用例未通过 (这是 RL 训练需要解决的问题)。")
+            print("Pipeline is functional: generated code runs, but some test cases failed. RL training is expected to improve this.")
         else:
-            print("⚠️ 结论：代码编译失败或运行全错。")
-            print("注意：对于未微调的 3B 模型，第一次做对竞赛题目可能有挑战。只要编译过程没报错，Pipeline 就是好的。")
+            print("Generated code failed to compile or failed all test cases.")
+            print("Note: an unfine-tuned 3B model may not solve a contest problem on the first try. If compilation and judging run, the pipeline is working.")
     else:
-        print("❌ 代码提取失败！模型可能没生成代码块。")
+        print("Code extraction failed. The model may not have generated a code block.")
 
 if __name__ == "__main__":
     main()

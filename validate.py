@@ -1,9 +1,7 @@
 """
 validate.py - Validation Script for TinyLoRA Model
-验证脚本 - 用于 TinyLoRA 模型验证
 
 This script provides validation functionality during training.
-本脚本在训练期间提供验证功能。
 """
 
 import torch
@@ -15,28 +13,27 @@ from utils import compile_and_run, convert_hf_tests_to_list, extract_code_from_r
 def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, temperature=0.7):
     """
     Run validation on a subset of the dataset
-    在数据集的子集上运行验证
     
     Args:
-        model: The model to validate / 要验证的模型
-        tokenizer: Tokenizer for the model / 模型的分词器
-        dataset: Validation dataset / 验证数据集
-        num_samples: Number of samples to validate / 要验证的样本数
-        max_length: Maximum generation length / 最大生成长度
-        temperature: Sampling temperature / 采样温度
+        model: The model to validate
+        tokenizer: Tokenizer for the model
+        dataset: Validation dataset
+        num_samples: Number of samples to validate
+        max_length: Maximum generation length
+        temperature: Sampling temperature
     
     Returns:
-        dict: Validation metrics including Pass@1 / 验证指标，包括 Pass@1
+        dict: Validation metrics including Pass@1
     """
     print(f"\n{'='*60}")
-    print(f"🔍 Starting validation... / 开始验证...")
-    print(f"📊 Samples to validate / 验证样本数: {num_samples}")
+    print(f"[CHECK] Starting validation...")
+    print(f"[STATS] Samples to validate: {num_samples}")
     print(f"{'='*60}\n")
     
-    # Ensure we don't exceed dataset size / 确保不超过数据集大小
+    # Ensure we don't exceed dataset size
     num_samples = min(num_samples, len(dataset))
     
-    # Set model to eval mode / 将模型设置为评估模式
+    # Set model to eval mode
     model.eval()
     
     total_score = 0.0
@@ -45,16 +42,16 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
     full_pass = 0
     
     with torch.no_grad():
-        for i in tqdm(range(num_samples), desc="Validating / 验证中"):
+        for i in tqdm(range(num_samples), desc="Validating"):
             sample = dataset[i]
             
-            # Get prompt / 获取提示
+            # Get prompt
             prompt = sample.get('prompt', '')
             if not prompt:
-                # If prompt is not pre-generated, skip / 如果提示未预生成，跳过
+                # If prompt is not pre-generated, skip
                 continue
             
-            # Prepare test cases / 准备测试用例
+            # Prepare test cases
             public_tests = sample.get('public_tests', {})
             private_tests = sample.get('private_tests', {})
             generated_tests = sample.get('generated_tests', {})
@@ -67,7 +64,7 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
             if not all_test_cases:
                 continue
             
-            # Tokenize and generate / 分词并生成
+            # Tokenize and generate
             inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
             inputs = {k: v.to(model.device) for k, v in inputs.items()}
             
@@ -80,26 +77,23 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
                     pad_token_id=tokenizer.eos_token_id,
                 )
                 
-                # Decode response / 解码响应
-                response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                # Decode generated tokens only
+                input_len = inputs["input_ids"].shape[-1]
+                response = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True).strip()
                 
-                # Remove prompt from response / 从响应中移除提示
-                if prompt in response:
-                    response = response[len(prompt):].strip()
-                
-                # Extract code / 提取代码
+                # Extract code
                 code = extract_code_from_response(response)
                 
                 if not code:
-                    # No valid code found / 未找到有效代码
+                    # No valid code found
                     continue
                 
-                # Compile and run / 编译并运行
+                # Compile and run
                 reward = compile_and_run(code, all_test_cases)
                 
                 total_score += reward
                 
-                # Track statistics / 跟踪统计信息
+                # Track statistics
                 if reward >= 0.5:
                     compile_success += 1
                 if reward == 0.5:
@@ -108,10 +102,10 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
                     full_pass += 1
                     
             except Exception as e:
-                print(f"⚠️ Error during generation / 生成时出错: {e}")
+                print(f"[WARN] Error during generation: {e}")
                 continue
     
-    # Calculate metrics / 计算指标
+    # Calculate metrics
     avg_score = total_score / num_samples if num_samples > 0 else 0.0
     compile_rate = compile_success / num_samples if num_samples > 0 else 0.0
     pass_at_1 = full_pass / num_samples if num_samples > 0 else 0.0
@@ -127,18 +121,18 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
     }
     
     print(f"\n{'='*60}")
-    print(f"✅ Validation complete / 验证完成")
+    print(f"[OK] Validation complete")
     print(f"{'='*60}")
-    print(f"📊 Validation Results / 验证结果:")
-    print(f"  • Average Score / 平均分数: {avg_score:.4f}")
-    print(f"  • Compile Rate / 编译成功率: {compile_rate:.2%}")
-    print(f"  • Pass@1 / 通过率: {pass_at_1:.2%}")
-    print(f"  • Compile Success / 编译成功: {compile_success}/{num_samples}")
-    print(f"  • Partial Pass / 部分通过: {partial_pass}/{num_samples}")
-    print(f"  • Full Pass / 完全通过: {full_pass}/{num_samples}")
+    print(f"[STATS] Validation Results:")
+    print(f"  - Average Score: {avg_score:.4f}")
+    print(f"  - Compile Rate: {compile_rate:.2%}")
+    print(f"  - Pass@1: {pass_at_1:.2%}")
+    print(f"  - Compile Success: {compile_success}/{num_samples}")
+    print(f"  - Partial Pass: {partial_pass}/{num_samples}")
+    print(f"  - Full Pass: {full_pass}/{num_samples}")
     print(f"{'='*60}\n")
     
-    # Set model back to train mode / 将模型设回训练模式
+    # Set model back to train mode
     model.train()
     
     return results
@@ -146,15 +140,15 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
 
 if __name__ == "__main__":
     """
-    Standalone validation script / 独立验证脚本
+    Standalone validation script
 
-    Usage / 用法:
+    Usage:
         python validate.py
         python validate.py --num_samples 50
         python validate.py --checkpoint ./output/luoguqwencoder-lora/best_tiny_lora_v.pt --num_samples 100
         python validate.py --no_quant
 
-    Example / 示例:
+    Example:
         # Default: 10 samples, 4-bit quantization
         python validate.py
 
@@ -169,10 +163,10 @@ if __name__ == "__main__":
     from utils import get_model_and_tokenizer, TinyLoRAGlobalParams, apply_tiny_lora
 
     parser = argparse.ArgumentParser(
-        description="Standalone validation script for TinyLoRA model / TinyLoRA 模型的独立验证脚本",
+        description="Standalone validation script for TinyLoRA model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples / 示例:
+Examples:
   python validate.py                              # Default: 10 samples, 4-bit
   python validate.py --num_samples 50            # Test with 50 samples
   python validate.py --no_quant                   # Load model in BF16
@@ -183,92 +177,95 @@ Examples / 示例:
         "--num_samples",
         type=int,
         default=10,
-        help="Number of samples to validate / 验证样本数 (default: 10)"
+        help="Number of samples to validate (default: 10)"
     )
     parser.add_argument(
         "--checkpoint",
         type=str,
         default="./output/luoguqwencoder-lora/tiny_lora_v.pt",
-        help="Path to checkpoint .pt file / 检查点 .pt 文件路径 (default: ./output/luoguqwencoder-lora/tiny_lora_v.pt)"
+        help="Path to checkpoint .pt file (default: ./output/luoguqwencoder-lora/tiny_lora_v.pt)"
     )
     parser.add_argument(
         "--model",
         type=str,
         default="./models/Qwen2.5-Coder-3B-Instruct",
-        help="Path to model or HuggingFace model ID / 模型路径或 HuggingFace 模型 ID (default: ./models/Qwen2.5-Coder-3B-Instruct)"
+        help="Path to model or HuggingFace model ID (default: ./models/Qwen2.5-Coder-3B-Instruct)"
     )
     parser.add_argument(
         "--val_data",
         type=str,
         default="./local_code_contests/code_contests_valid.jsonl",
-        help="Path to validation dataset / 验证数据集路径 (default: ./local_code_contests/code_contests_valid.jsonl)"
+        help="Path to validation dataset (default: ./local_code_contests/code_contests_valid.jsonl)"
     )
     parser.add_argument(
         "--no_quant",
         action="store_true",
-        help="Disable 4-bit quantization, load model in BF16 / 禁用 4-bit 量化，以 BF16 加载模型"
+        help="Disable 4-bit quantization, load model in BF16"
     )
 
     args = parser.parse_args()
 
-    # Configuration / 配置
+    # Configuration
     MODEL_PATH = args.model
     CHECKPOINT_PATH = args.checkpoint
     VAL_DATA_PATH = args.val_data
     NUM_SAMPLES = args.num_samples
     USE_QUANT = not args.no_quant
     
-    print(f"\n🚀 Standalone Validation Mode / 独立验证模式")
-    print(f"📦 Model Path / 模型路径: {MODEL_PATH}")
-    print(f"💾 Checkpoint Path / 检查点路径: {CHECKPOINT_PATH}")
-    print(f"📁 Validation Data / 验证数据: {VAL_DATA_PATH}")
-    print(f"🔢 Validation Samples / 验证样本数: {NUM_SAMPLES}")
-    print(f"📦 Quantization / 量化加载: {'4-bit' if USE_QUANT else 'BF16 (no quant)'}\n")
+    print(f"\n[START] Standalone Validation Mode")
+    print(f"[LOAD] Model Path: {MODEL_PATH}")
+    print(f"[SAVE] Checkpoint Path: {CHECKPOINT_PATH}")
+    print(f"[FILE] Validation Data: {VAL_DATA_PATH}")
+    print(f"[NUM] Validation Samples: {NUM_SAMPLES}")
+    print(f"[LOAD] Quantization: {'4-bit' if USE_QUANT else 'BF16 (no quant)'}\n")
     
-    # Load checkpoint / 加载检查点
+    # Load checkpoint
     checkpoint = torch.load(CHECKPOINT_PATH, map_location='cpu')
     u_value = checkpoint['u_value']
+    rank = checkpoint.get('rank', 2)
     seed = checkpoint['seed']
     
-    # Check quantization state from checkpoint / 从检查点读取量化状态
+    # Check quantization state from checkpoint
     trained_with_quant = checkpoint.get("is_quantized", False)
-    print(f"📌 模型微调时的量化状态: {'4-bit' if trained_with_quant else 'BF16/FP16'}")
+    print(f"[NOTE] Checkpoint quantization: {'4-bit' if trained_with_quant else 'BF16/FP16'}")
     if USE_QUANT != trained_with_quant:
-        print("⚠️ 警告: 当前验证时的量化状态与训练时不同，可能会有微小精度差异。")
+        print("[WARN] Warning: validation quantization differs from training; small numeric differences are possible.")
     
-    # Set random seed / 设置随机种子
+    # Set random seed
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
-    print(f"✅ Random seed set / 已设置随机种子: {seed}")
+    print(f"[OK] Random seed set: {seed}")
     
-    # Load model and tokenizer / 加载模型和分词器
+    # Load model and tokenizer
     model, tokenizer = get_model_and_tokenizer(MODEL_PATH, use_4bit=USE_QUANT)
     
-    # Create global params / 创建全局参数
+    # Create global params
     device = model.model.layers[0].self_attn.q_proj.weight.device
     global_params = TinyLoRAGlobalParams(u_dim=u_value, device=device, dtype=torch.bfloat16)
     
-    # Inject TinyLoRA / 注入 TinyLoRA
+    # Inject TinyLoRA
     model.tiny_lora_params = global_params
-    print(f"🔧 Injecting TinyLoRA... / 正在注入 TinyLoRA...")
-    total_replaced = apply_tiny_lora(model, global_params)
-    print(f"✅ TinyLoRA injected / TinyLoRA 注入完成: {total_replaced} layers / 层")
+    print(f"[SETUP] Injecting TinyLoRA...")
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    total_replaced = apply_tiny_lora(model, global_params, rank=rank)
+    print(f"[OK] TinyLoRA injected: {total_replaced} layers")
     
-    # Load trained weights / 加载训练好的权重
+    # Load trained weights
     with torch.no_grad():
         global_params.global_v.copy_(checkpoint['global_v'].to(global_params.global_v.dtype).to(device))
-    print(f"✅ Loaded trained weights / 已加载训练权重: global_v shape={global_params.global_v.shape}")
+    print(f"[OK] Loaded trained weights: global_v shape={global_params.global_v.shape}")
     
-    # Load validation dataset / 加载验证数据集
+    # Load validation dataset
     val_dataset = load_dataset("json", data_files=VAL_DATA_PATH, split="train")
     
-    # Apply chat template if needed / 如果需要，应用聊天模板
+    # Apply chat template if needed
     if 'prompt' not in val_dataset.column_names:
-        print(f"🔄 Applying chat template... / 正在应用聊天模板...")
+        print(f"[RUN] Applying chat template...")
         val_dataset = val_dataset.map(lambda x: apply_chat_template(x, tokenizer))
     
-    # Run validation / 运行验证
+    # Run validation
     results = run_validation(model, tokenizer, val_dataset, num_samples=NUM_SAMPLES)
     
-    print(f"\n✅ Validation finished! / 验证完成！")
-    print(f"📊 Final Pass@1 / 最终通过率: {results['pass_at_1']:.2%}")
+    print(f"\n[OK] Validation finished!")
+    print(f"[STATS] Final Pass@1: {results['pass_at_1']:.2%}")
