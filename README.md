@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 # 🧬 TinyLoRA-GRPO-Coder
@@ -180,7 +182,7 @@ pip install -r requirements.txt
 # Option A: CodeContests dataset (default; train + validation + test)
 python download_code_contests.py --splits train valid test
 
-# Option B: DeepCoder dataset (from agentica-org/DeepCoder-Preview-Dataset, parquet format)
+# Option B: DeepCoder dataset (from agentica-org/DeepCoder-Preview-Dataset, parquet format; requires a local HuggingFace cache)
 python download_DeepCoder-Preview-Dataset.py
 ```
 
