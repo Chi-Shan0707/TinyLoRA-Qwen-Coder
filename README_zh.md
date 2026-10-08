@@ -21,7 +21,7 @@
 
 > **v4.1** — Rename this project from `TinyLoRA-Qwen-Coder` to `TinyLoRA-GRPO-Coder`.
 
-> **v4.0** — Increased `num_iterations=4` (making clip_high more effective) · DeepCoder-Preview-Dataset (lcbv5, 28 samples) · Pass@1 +100% · Training time -73%
+> **v4.0 historical runs** — `num_iterations=4` · DeepCoder-Preview-Dataset (lcbv5, 28 samples) · Pass@1 3/165 → 6/165 · Recorded training time -73%
 
 > We adapt TinyLoRA from math reasoning to competitive programming: inject tiny shared parameters into Qwen2.5-Coder-3B, train with GRPO, and reward real `g++` compile-and-run correctness.
 >
@@ -92,7 +92,7 @@ TinyLoRA 冻结预训练模型的权重，并注入一个**极小的可训练参
 
 **v4.0: `num_iterations=4` + DeepCoder 数据集 (lcbv5)**
 
-严格控制变量（相同测试条件）下：
+两个微调 checkpoint 的历史结果（报告的测试条件相同）：
 
 - 测试种子：`42`
 - 测试数据集：`code_contests_test.jsonl`
@@ -117,9 +117,8 @@ TinyLoRA 冻结预训练模型的权重，并注入一个**极小的可训练参
 | **编译成功率** | 73.33% (121/165) | 76.36% (126/165) | **+4.13%** |
 | **平均分数** | 0.4274 | 0.4489 | **+5.03%** |
 
-v4.0 表明：
-- 使用更高质量的训练数据 (lcbv5) 显著提升模型性能
-- 增加 `num_iterations` 使 clip_high (DeepCoder 方法) 更有效
+历史记录：
+- 这些历史运行同时改变数据、样本数及 `num_iterations`，新增做对 3 题（+1.82 个百分点）。两行均为微调模型，不能据此证明稳定超过基座，或单独归因于某项改变；旧评测还包含本次修复的问题，历史 adapter 实现也不同于当前共享投影的完整矩阵实现。
 - 训练数据减少 **99.8%** (13328 → 28)
 - 训练时间减少 **73%** (4小时24分 → 1小时12分)
 
@@ -157,13 +156,13 @@ python train_rl.py 32 20 --do_validate --val_steps 10 --val_samples 10
 | **平均分数** | 0.4500 | 0.4000 | -0.05 |
 | **编译成功率** | 80.00% (8/10) | 80.00% (8/10) | 持平 |
 | **Pass@1** | 10.00% (1/10) | 0.00% (0/10) | -10% |
-| **部分通过** | **7/10** | **8/10** | **+1** |
+| **旧指标：零用例通过** | **7/10** | **8/10** | **+1** |
 | **未提取到代码** | 0/10 | 0/10 | 持平 |
 
 解读：
 
 - 极小参数 RL 已在严格对照下改变模型行为；
-- 小样本阶段通常先出现”部分通过增加”，再向 Pass@1 收敛。
+- 旧版“部分通过”实际统计编译成功但零用例通过，其增加不能说明解题正确率提升。
 
 ### ⚡ 快速开始（安装 + 配置 + 启动）
 
@@ -181,7 +180,8 @@ pip install -r requirements.txt
 # CodeContests 数据集（默认；train + valid + test）
 python download_code_contests.py --splits train valid test
 
-# DeepCoder 数据集（agentica-org/DeepCoder-Preview-Dataset）
+# 转换本地 HF 缓存中的 DeepCoder parquet 数据；本脚本不下载缺失文件。
+# 请先准备 agentica-org/DeepCoder-Preview-Dataset 的本地缓存。
 python download_DeepCoder-Preview-Dataset.py
 ```
 
@@ -243,7 +243,7 @@ python test.py --baseline --num_samples 50
 #### 🎯 块 1：奖励系统（`train_rl.py` + `utils.py`）
 
 - **入口**：`code_reward_func` + `compile_and_run`
-- **当前机制**：编译失败 `0.0`，部分通过 `0.5`，全部通过 `1.0`
+- **当前机制**：编译失败 `0.0`，零用例通过 `0.5`，部分通过 `0.5 + 0.5 × (k/N)`，全部通过 `1.0`
 - **可调范围**：
   - 离散/连续奖励形状
   - `public/private/generated` 测试源组合

@@ -39,6 +39,7 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
     total_score = 0.0
     compile_success = 0
     partial_pass = 0
+    zero_pass = 0
     full_pass = 0
     
     with torch.no_grad():
@@ -97,6 +98,8 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
                 if reward >= 0.5:
                     compile_success += 1
                 if reward == 0.5:
+                    zero_pass += 1
+                elif 0.5 < reward < 1.0:
                     partial_pass += 1
                 elif reward == 1.0:
                     full_pass += 1
@@ -116,6 +119,7 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
         'pass_at_1': pass_at_1,
         'compile_success': compile_success,
         'partial_pass': partial_pass,
+        'zero_pass': zero_pass,
         'full_pass': full_pass,
         'total_samples': num_samples,
     }
@@ -129,6 +133,7 @@ def run_validation(model, tokenizer, dataset, num_samples=10, max_length=1024, t
     print(f"  - Pass@1: {pass_at_1:.2%}")
     print(f"  - Compile Success: {compile_success}/{num_samples}")
     print(f"  - Partial Pass: {partial_pass}/{num_samples}")
+    print(f"  - Zero Tests Passed: {zero_pass}/{num_samples}")
     print(f"  - Full Pass: {full_pass}/{num_samples}")
     print(f"{'='*60}\n")
     

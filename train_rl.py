@@ -710,7 +710,7 @@ class ValidationCallback(TrainerCallback):
             # Check if this is the best model
             current_score = results['pass_at_1']
             
-            if current_score > self.best_score:
+            if current_score > self.best_score and state.is_world_process_zero:
                 previous_best = self.best_score
                 self.best_score = current_score
                 print(f"\n{'='*80}")
@@ -733,6 +733,7 @@ class ValidationCallback(TrainerCallback):
                 }
                 
                 best_path = f"{self.output_dir}/best_tiny_lora_v.pt"
+                os.makedirs(self.output_dir, exist_ok=True)
                 torch.save(best_save_dict, best_path)
                 print(f"[SAVE] Best model saved to: {best_path}")
                 print(f"[STATS] Validation Pass@1: {current_score:.2%}\n")
@@ -826,7 +827,8 @@ save_dict = {
     "total_replaced_layers": total_replaced,   # Number of replaced layers
     "is_quantized": USE_QUANT,                 # Whether model was loaded with 4-bit quantization
 }
-torch.save(save_dict, f"{OUTPUT_DIR}/tiny_lora_v.pt")
+if trainer.is_world_process_zero():
+    torch.save(save_dict, f"{OUTPUT_DIR}/tiny_lora_v.pt")
 print(f"[OK] Training complete!")
 print(f"[STATS] Save contents: global_v (shape={global_params.global_v.shape}), u={U_VALUE}, rank={TINYLORA_RANK}, seed={TINYLORA_SEED}")
 

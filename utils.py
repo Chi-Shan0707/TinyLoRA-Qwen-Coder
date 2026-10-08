@@ -102,10 +102,7 @@ class TinyLoRALinear(nn.Module):
         try:
             U, S, Vh = torch.linalg.svd(W_dequant, full_matrices=False)
         except Exception as e:
-            print(f"[WARN] SVD failed, using zeros: {e}")
-            U = torch.zeros(self.out_features, min(self.out_features, self.in_features))
-            S = torch.zeros(min(self.out_features, self.in_features))
-            Vh = torch.zeros(min(self.out_features, self.in_features), self.in_features)
+            raise RuntimeError("TinyLoRA SVD initialization failed") from e
         
         # Keep only top 'rank' components
         U_r = U[:, :self.rank]
@@ -275,7 +272,7 @@ def compile_and_run(code, test_cases, timeout=2):
                 
                 actual_output = result.stdout.strip()
                 
-                if actual_output == expected_output:
+                if result.returncode == 0 and actual_output == expected_output:
                     passed += 1
             except subprocess.TimeoutExpired:
                 continue

@@ -51,4 +51,4 @@ v4.0 replaces the original code_contests dataset with Deep-Coder-Preview-Dataset
 - **Training data reduced by 99.8%** (13328 → 28)
 - **Training time reduced by 73%** (4h24m → 1h12m)
 
-This demonstrates that using higher quality training data (lcbv5) can significantly improve model performance while substantially reducing training costs.
+These are historical measurements of two fine-tuned checkpoints: three additional solved problems (+1.82 percentage points). Data, sample count and optimization settings changed together, so this comparison does not isolate their effects or demonstrate a stable improvement over the base model. The historical evaluator had bugs now corrected, and the adapter implementation has since changed; these values have not been rerun with the current implementation.

@@ -21,7 +21,7 @@
 
 > **v4.1** — Rename this project from `TinyLoRA-Qwen-Coder` to `TinyLoRA-GRPO-Coder`.
 
-> **v4.0** — Increased `num_iterations=4` (making clip_high more effective) · DeepCoder-Preview-Dataset (lcbv5, 28 samples) · Pass@1 +100% · Training time -73%
+> **v4.0 historical runs** — `num_iterations=4` · DeepCoder-Preview-Dataset (lcbv5, 28 samples) · Pass@1 3/165 → 6/165 · Recorded training time -73%
 
 > We adapt TinyLoRA from math reasoning to competitive programming: inject tiny shared parameters into Qwen2.5-Coder-3B, train with GRPO, and reward real `g++` compile-and-run correctness.
 >
@@ -89,7 +89,7 @@ The reward function evaluates code quality through actual compilation and execut
 
 **v4.0: Increased `num_iterations=4` + DeepCoder Dataset (lcbv5)**
 
-Strict A/B comparison with identical test conditions:
+Historical comparison of two fine-tuned checkpoints under the reported test conditions:
 
 - test seed: `42`
 - same test dataset: `code_contests_test.jsonl`
@@ -114,9 +114,9 @@ Test results:
 | **Compile Rate** | 73.33% (121/165) | 76.36% (126/165) | **+4.13%** |
 | **Average Score** | 0.4274 | 0.4489 | **+5.03%** |
 
-v4.0 demonstrates that:
-- Using higher quality training data (lcbv5) significantly improves model performance
-- Increasing `num_iterations` makes clip_high (DeepCoder method) more effective
+These historical runs changed the training data, sample count and `num_iterations` together. Pass@1 rose by three solved problems (+1.82 percentage points); neither row is the base model, and these results do not establish a stable gain or isolate a causal contribution from either change. The old evaluator also included bugs corrected in this repository, and the historical adapter implementation differs from the current shared-projection full-matrix implementation.
+
+Recorded training costs:
 - Training data reduced by **99.8%** (13328 → 28)
 - Training time reduced by **73%** (4h24m → 1h12m)
 
@@ -155,13 +155,13 @@ Test comparison:
 | **Average Score** | 0.4500 | 0.4000 | -0.05 |
 | **Compile Rate** | 80.00% (8/10) | 80.00% (8/10) | Same |
 | **Pass@1** | 10.00% (1/10) | 0.00% (0/10) | -10% |
-| **Partial Pass** | **7/10** | **8/10** | **+1** |
+| **Legacy zero-tests-passed count** | **7/10** | **8/10** | **+1** |
 | **No Code Extracted** | 0/10 | 0/10 | Same |
 
 Interpretation:
 
 - tiny-parameter RL already changes model behavior under strict controls;
-- early-stage gains can first appear as partial-pass improvements before full-pass convergence.
+- the legacy “Partial Pass” field counted compiled solutions passing zero tests; its increase is not evidence of improved correctness.
 
 
 ### ⚡ Quick Start (Install + Configure + Run)
@@ -180,7 +180,8 @@ pip install -r requirements.txt
 # Option A: CodeContests dataset (default; train + validation + test)
 python download_code_contests.py --splits train valid test
 
-# Option B: DeepCoder dataset (from agentica-org/DeepCoder-Preview-Dataset, parquet format)
+# Option B: convert DeepCoder parquet files already present in the local HF cache.
+# This converter does not download files; prepare the upstream dataset cache first.
 python download_DeepCoder-Preview-Dataset.py
 ```
 
@@ -244,7 +245,7 @@ This section is organized by code-level **control blocks** (not flat knobs), mat
 - **Entry points**: `code_reward_func` in `train_rl.py`, `compile_and_run` in `utils.py`.
 - **Current behavior**:
   - compile fail / invalid code → `0.0`
-  - compile success (partial) → `0.5`
+  - compile success, zero tests passed → `0.5`; partial pass → `0.5 + 0.5 × (k/N)`
   - full pass → `1.0`
 - **Controllable scope**:
   - reward shape (discrete vs continuous)

@@ -7,7 +7,8 @@ Dataset: agentica-org/DeepCoder-Preview-Dataset
 - Each has 'train' split
 - Fields: problem, tests, metadata
 
-This script reads from local cache if available, or downloads from HuggingFace.
+This script converts parquet files from the local HuggingFace cache.
+It does not download missing files.
 
 Usage:
     python download_DeepCoder-Preview-Dataset.py
@@ -64,40 +65,27 @@ def convert_tests_format(tests_data):
         except (json.JSONDecodeError, ValueError):
             return None
 
-    # Format 1: list format
-    if isinstance(tests_data, list) and len(tests_data) > 0:
-        # Check whether the first item is a dict
-        if isinstance(tests_data[0], dict):
-            inputs = []
-            outputs = []
-            for tc in tests_data:
-                if isinstance(tc, dict):
-                    inp = tc.get("input", "")
-                    out = tc.get("output", "")
-                    if inp is not None:
-                        inputs.append(inp)
-                    if out is not None:
-                        outputs.append(out)
-
-            if len(inputs) >= 5 and len(outputs) >= 5:
-                return {"inputs": inputs, "outputs": outputs}
-
-    # Format 2: dict format
-    if isinstance(tests_data, dict):
+    # Filter complete pairs together; empty input/output strings are valid.
+    if isinstance(tests_data, list):
+        pairs = [
+            (tc.get("input"), tc.get("output"))
+            for tc in tests_data if isinstance(tc, dict)
+        ]
+    elif isinstance(tests_data, dict):
         inputs = tests_data.get("inputs", [])
         outputs = tests_data.get("outputs", [])
-
-        # Ensure values are lists
         if not isinstance(inputs, list):
             inputs = [inputs]
         if not isinstance(outputs, list):
             outputs = [outputs]
+        pairs = list(zip(inputs, outputs))
+    else:
+        return None
 
-        # Check whether enough test cases are available
-        if len(inputs) >= 5 and len(outputs) >= 5:
-            return {"inputs": inputs, "outputs": outputs}
-
-    return None
+    pairs = [(inp, out) for inp, out in pairs if inp is not None and out is not None]
+    if len(pairs) < 5:
+        return None
+    return {"inputs": [inp for inp, _ in pairs], "outputs": [out for _, out in pairs]}
 
 
 def process_config(config_name):

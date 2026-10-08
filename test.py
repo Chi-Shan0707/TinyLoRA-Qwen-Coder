@@ -169,6 +169,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
     total_score = 0.0
     compile_success = 0
     partial_pass = 0
+    zero_pass = 0
     full_pass = 0
     no_code_extracted = 0
     
@@ -227,6 +228,8 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
                 if reward >= 0.5:
                     compile_success += 1
                 if reward == 0.5:
+                    zero_pass += 1
+                elif 0.5 < reward < 1.0:
                     partial_pass += 1
                 elif reward == 1.0:
                     full_pass += 1
@@ -250,6 +253,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
     print(f"   - Compile Rate: {compile_rate:.2%} ({compile_success}/{num_samples})")
     print(f"   - Pass@1: {pass_at_1:.2%} ({full_pass}/{num_samples})")
     print(f"   - Partial Pass: {partial_pass}/{num_samples}")
+    print(f"   - Zero Tests Passed: {zero_pass}/{num_samples}")
     print(f"   - No Code Extracted: {no_code_extracted}/{num_samples}")
     print(f"{'='*80}\n")
     
@@ -260,6 +264,7 @@ def test_model(checkpoint_path, num_samples=50, test_data_path="./local_code_con
         'pass_at_1': pass_at_1,
         'compile_success': compile_success,
         'partial_pass': partial_pass,
+        'zero_pass': zero_pass,
         'full_pass': full_pass,
         'no_code_extracted': no_code_extracted,
     }

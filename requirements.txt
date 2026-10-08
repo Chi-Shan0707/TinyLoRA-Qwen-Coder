@@ -25,3 +25,6 @@ safetensors
 tqdm
 filelock
 huggingface-hub
+
+pandas
+pyarrow
